@@ -440,7 +440,7 @@ def get_model(pretrained_model_name_or_path: str) -> str:
     if os.getenv('VLLM_USE_MODELSCOPE', 'False').lower() == 'true':
         from modelscope import snapshot_download
 
-        from vllm.model_executor.model_loader.weight_utils import get_lock
+        from spexis.model_executor.model_loader.weight_utils import get_lock
 
         # Use file lock to prevent multiple processes from
         # downloading the same model weights at the same time.
@@ -471,7 +471,7 @@ def get_tokenizer(
         kwargs["use_fast"] = False
     if tokenizer_mode == "mistral":
         try:
-            from vllm.transformers_utils.tokenizer import MistralTokenizer
+            from spexis.transformers_utils.tokenizer import MistralTokenizer
         except ImportError as e:
             raise ImportError("MistralTokenizer requires vllm package.\n"
                               "Please install it with `pip install vllm` "

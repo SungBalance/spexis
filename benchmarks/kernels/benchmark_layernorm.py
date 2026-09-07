@@ -4,9 +4,9 @@ import time
 
 import torch
 
-from vllm.model_executor.layers.layernorm import RMSNorm
-from vllm.platforms import current_platform
-from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, FlexibleArgumentParser
+from spexis.model_executor.layers.layernorm import RMSNorm
+from spexis.platforms import current_platform
+from spexis.utils import STR_DTYPE_TO_TORCH_DTYPE, FlexibleArgumentParser
 
 
 @torch.inference_mode()

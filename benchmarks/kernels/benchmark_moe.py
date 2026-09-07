@@ -14,9 +14,9 @@ import triton
 from ray.experimental.tqdm_ray import tqdm
 from transformers import AutoConfig
 
-from vllm.model_executor.layers.fused_moe.fused_moe import *
-from vllm.platforms import current_platform
-from vllm.utils import FlexibleArgumentParser
+from spexis.model_executor.layers.fused_moe.fused_moe import *
+from spexis.platforms import current_platform
+from spexis.utils import FlexibleArgumentParser
 
 FP8_DTYPE = current_platform.fp8_dtype()
 
@@ -112,7 +112,7 @@ def benchmark_config(config: BenchmarkConfig,
         input_gating.copy_(gating_output[i])
 
     def run():
-        from vllm.model_executor.layers.fused_moe import override_config
+        from spexis.model_executor.layers.fused_moe import override_config
         with override_config(config):
             if use_deep_gemm:
                 topk_weights, topk_ids = fused_topk(x, input_gating, topk,

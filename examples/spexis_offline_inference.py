@@ -19,7 +19,7 @@ the CPU instead of holding them on the GPU).
 import argparse
 import os
 
-from vllm import LLM, SamplingParams
+from spexis import LLM, SamplingParams
 
 
 def main() -> None:

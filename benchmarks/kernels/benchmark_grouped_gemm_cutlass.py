@@ -4,12 +4,12 @@ import torch
 import torch.utils.benchmark as benchmark
 from benchmark_shapes import WEIGHT_SHAPES_MOE
 
-from vllm import _custom_ops as ops
-from vllm.config import ParallelConfig, VllmConfig, set_current_vllm_config
-from vllm.model_executor.layers.fused_moe.fused_moe import (cutlass_moe_fp8,
+from spexis import _custom_ops as ops
+from spexis.config import ParallelConfig, VllmConfig, set_current_vllm_config
+from spexis.model_executor.layers.fused_moe.fused_moe import (cutlass_moe_fp8,
                                                             fused_experts,
                                                             fused_topk)
-from vllm.utils import FlexibleArgumentParser
+from spexis.utils import FlexibleArgumentParser
 
 DEFAULT_MODELS = [
     "nm-testing/Mixtral-8x7B-Instruct-v0.1", "nm-testing/deepseekv2-lite",

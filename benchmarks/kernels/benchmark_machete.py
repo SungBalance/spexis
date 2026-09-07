@@ -18,16 +18,16 @@ import torch.utils.benchmark as TBenchmark
 from torch.utils.benchmark import Measurement as TMeasurement
 from weight_shapes import WEIGHT_SHAPES
 
-from vllm import _custom_ops as ops
-from vllm.model_executor.layers.quantization.utils.marlin_utils import (
+from spexis import _custom_ops as ops
+from spexis.model_executor.layers.quantization.utils.marlin_utils import (
     GPTQ_MARLIN_MAX_PARALLEL, GPTQ_MARLIN_MIN_THREAD_N, marlin_permute_scales,
     marlin_zero_points)
-from vllm.model_executor.layers.quantization.utils.marlin_utils_test import (
+from spexis.model_executor.layers.quantization.utils.marlin_utils_test import (
     MarlinWorkspace)
-from vllm.model_executor.layers.quantization.utils.quant_utils import (
+from spexis.model_executor.layers.quantization.utils.quant_utils import (
     pack_rows, quantize_weights)
-from vllm.scalar_type import ScalarType, scalar_types
-from vllm.utils import FlexibleArgumentParser
+from spexis.scalar_type import ScalarType, scalar_types
+from spexis.utils import FlexibleArgumentParser
 
 DEFAULT_MODELS = ["meta-llama/Llama-3-8b", "meta-llama/Llama-2-70b-hf"]
 DEFAULT_BATCH_SIZES = [1, 16, 32, 64, 128, 256, 512, 1024]

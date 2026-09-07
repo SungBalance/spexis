@@ -14,8 +14,8 @@ from torch.utils.benchmark import Measurement as TMeasurement
 from utils import make_rand_sparse_tensors
 from weight_shapes import WEIGHT_SHAPES
 
-from vllm import _custom_ops as ops
-from vllm.utils import FlexibleArgumentParser
+from spexis import _custom_ops as ops
+from spexis.utils import FlexibleArgumentParser
 
 DEFAULT_MODELS = list(WEIGHT_SHAPES.keys())
 DEFAULT_BATCH_SIZES = [1, 16, 32, 64, 128, 256, 512]

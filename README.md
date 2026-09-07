@@ -29,17 +29,17 @@ pipeline and tensor parallelism.
 
 | Component | Where |
 |---|---|
-| Speculative pipeline scheduler (drop policy, lookahead admission) | `vllm/spec_parallel/scheduler.py` |
-| Early-exit draft models (Llama / Qwen adapters) | `vllm/spec_parallel/exit_models/` |
-| Model runner that runs target model + exit layer together | `vllm/spec_parallel/gpu_model_runner.py` |
-| Generation-length predictor and peak-KV projection | `vllm/lookahead_scheduling/length_predictor.py`, `length_calc.py` |
-| KV manager that keeps unverified tokens out of the prefix cache | `vllm/spec_parallel/kv_cache_manager.py` |
-| Per-iteration metrics log | `vllm/spec_parallel/iteration_log.py` |
+| Speculative pipeline scheduler (drop policy, lookahead admission) | `spexis/spec_parallel/scheduler.py` |
+| Early-exit draft models (Llama / Qwen adapters) | `spexis/spec_parallel/exit_models/` |
+| Model runner that runs target model + exit layer together | `spexis/spec_parallel/gpu_model_runner.py` |
+| Generation-length predictor and peak-KV projection | `spexis/lookahead_scheduling/length_predictor.py`, `length_calc.py` |
+| KV manager that keeps unverified tokens out of the prefix cache | `spexis/spec_parallel/kv_cache_manager.py` |
+| Per-iteration metrics log | `spexis/spec_parallel/iteration_log.py` |
 
-Everything Spexis adds lives in `vllm/spec_parallel/` and
-`vllm/lookahead_scheduling/`. Where upstream vLLM files
+Everything Spexis adds lives in `spexis/spec_parallel/` and
+`spexis/lookahead_scheduling/`. Where upstream vLLM files
 had to be touched, the changed regions are marked with `[Spexis]`, so
-`grep -rn "\[Spexis\]" vllm/` shows the full integration surface.
+`grep -rn "\[Spexis\]" spexis/` shows the full integration surface.
 
 ## Requirements
 
@@ -69,8 +69,12 @@ pip install -e . --no-build-isolation
 pip install "transformers==4.57.6" "ray[cgraph]==2.53.0" accelerate
 ```
 
-> The package is still importable as `vllm`, so a Spexis install replaces
-> vLLM in the same environment. Use a dedicated virtualenv/conda env.
+> The package installs and imports as `spexis`, so it can coexist with an
+> upstream vLLM installation. Environment variables keep their `VLLM_*`
+> names and the torch custom-op namespace remains `torch.ops.vllm`, so
+> existing launch scripts and tooling keep working. The upstream
+> `vllm==0.8.4` wheel is only opened to extract its compiled kernels into
+> `spexis/`.
 
 ### Exit-model artifacts
 
@@ -102,7 +106,7 @@ The same options are available on the engine and the OpenAI-compatible
 server, e.g.:
 
 ```bash
-vllm serve /path/to/Llama-3.3-70B-Instruct \
+spexis serve /path/to/Llama-3.3-70B-Instruct \
     --pipeline-parallel-size 2 --distributed-executor-backend ray \
     --enable-spexis True \
     --exit-layer True False \
@@ -143,11 +147,11 @@ Key options:
 This is a research prototype released alongside the paper, not a
 production serving stack. It is being cleaned up in stages:
 
-- [x] Core system (`vllm/spec_parallel/`, `vllm/lookahead_scheduling/` and their engine integration)
+- [x] Core system (`spexis/spec_parallel/`, `spexis/lookahead_scheduling/` and their engine integration)
 - [x] Trimmed to the CUDA-only surface the paper uses (Llama/Qwen families)
 - [ ] Experiment and reproduction scripts
 - [ ] Exit-model artifacts and the code that trains them
-- [ ] Package rename (`vllm` → `spexis`)
+- [x] Package rename (`vllm` → `spexis`)
 
 Feature parity with upstream vLLM is explicitly *not* a goal: support for
 non-CUDA platforms, most model architectures, and V0 speculative decoding

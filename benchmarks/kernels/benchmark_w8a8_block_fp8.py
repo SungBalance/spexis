@@ -13,10 +13,10 @@ import torch
 import tqdm
 import triton
 
-from vllm.model_executor.layers.quantization.utils.fp8_utils import (
+from spexis.model_executor.layers.quantization.utils.fp8_utils import (
     _w8a8_block_fp8_matmul)
-from vllm.platforms import current_platform
-from vllm.utils import FlexibleArgumentParser
+from spexis.platforms import current_platform
+from spexis.utils import FlexibleArgumentParser
 
 mp.set_start_method("spawn", force=True)
 

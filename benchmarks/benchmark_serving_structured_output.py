@@ -42,16 +42,16 @@ from tqdm.asyncio import tqdm
 from transformers import PreTrainedTokenizerBase
 
 try:
-    from vllm.transformers_utils.tokenizer import get_tokenizer
+    from spexis.transformers_utils.tokenizer import get_tokenizer
 except ImportError:
     from backend_request_func import get_tokenizer
 
 try:
-    from vllm.utils import FlexibleArgumentParser
+    from spexis.utils import FlexibleArgumentParser
 except ImportError:
     from argparse import ArgumentParser as FlexibleArgumentParser
 
-from vllm.v1.structured_output.utils import (
+from spexis.v1.structured_output.utils import (
     has_xgrammar_unsupported_json_features)
 
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000

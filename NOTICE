@@ -8,7 +8,12 @@ License, Version 2.0.
 Spexis is a fork of vLLM v0.8.4 (commit dc1b4a6f1300003ae27f033afbdff5e2683721ce).
 The following modifications were made to the original software:
 
-  * Added vllm/spec_parallel/ and vllm/lookahead_scheduling/, which
+  * Renamed the Python package from vllm to spexis. Environment
+    variable names (VLLM_*), the torch custom-op namespace
+    (torch.ops.vllm), and the plugin entry-point group names retain
+    their vllm prefixes. Usage-stats reporting is disabled by default so
+    the fork does not feed the upstream telemetry service.
+  * Added spexis/spec_parallel/ and spexis/lookahead_scheduling/, which
     implement speculative pipeline parallelism: early-exit draft models
     attached at pipeline-stage boundaries, a
     scheduler that overlaps speculation with normal execution and

@@ -43,9 +43,9 @@ import dataclasses
 import random
 import time
 
-from vllm import LLM, SamplingParams
-from vllm.engine.arg_utils import EngineArgs
-from vllm.utils import FlexibleArgumentParser
+from spexis import LLM, SamplingParams
+from spexis.engine.arg_utils import EngineArgs
+from spexis.utils import FlexibleArgumentParser
 
 
 def test_long_document_qa(llm=None, sampling_params=None, prompts=None):

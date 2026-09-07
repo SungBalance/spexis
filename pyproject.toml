@@ -13,7 +13,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vllm"
+name = "spexis"
 authors = [{name = "vLLM Team"}]
 license = { "file"= "LICENSE" }
 readme = "README.md"
@@ -39,7 +39,7 @@ Documentation="https://vllm.readthedocs.io/en/latest/"
 Slack="http://slack.vllm.ai/"
 
 [project.scripts]
-vllm = "vllm.entrypoints.cli.main:main"
+spexis = "spexis.entrypoints.cli.main:main"
 
 [tool.setuptools_scm]
 # Installs from a tarball (no git metadata) report the fork's base.

@@ -7,11 +7,11 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 
-from vllm import _custom_ops as ops
-from vllm.model_executor.layers.quantization.aqlm import (
+from spexis import _custom_ops as ops
+from spexis.model_executor.layers.quantization.aqlm import (
     dequantize_weight, generic_dequantize_gemm, get_int_dtype,
     optimized_dequantize_gemm)
-from vllm.utils import FlexibleArgumentParser
+from spexis.utils import FlexibleArgumentParser
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 

@@ -10,7 +10,7 @@ import pandas as pd
 import seaborn as sns
 from torch.utils.benchmark import Measurement as TMeasurement
 
-from vllm.utils import FlexibleArgumentParser
+from spexis.utils import FlexibleArgumentParser
 
 if __name__ == "__main__":
     parser = FlexibleArgumentParser(

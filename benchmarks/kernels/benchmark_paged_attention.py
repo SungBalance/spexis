@@ -6,10 +6,10 @@ from typing import Optional
 
 import torch
 
-from vllm import _custom_ops as ops
-from vllm.logger import init_logger
-from vllm.platforms import current_platform
-from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, FlexibleArgumentParser,
+from spexis import _custom_ops as ops
+from spexis.logger import init_logger
+from spexis.platforms import current_platform
+from spexis.utils import (STR_DTYPE_TO_TORCH_DTYPE, FlexibleArgumentParser,
                         create_kv_caches_with_random)
 
 logger = init_logger(__name__)

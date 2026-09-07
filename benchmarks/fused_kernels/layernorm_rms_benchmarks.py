@@ -12,8 +12,8 @@ import torch.utils.benchmark as TBenchmark
 from torch.utils.benchmark import Measurement as TMeasurement
 from tqdm import tqdm
 
-import vllm._custom_ops as ops
-from vllm.model_executor.layers.layernorm import RMSNorm
+import spexis._custom_ops as ops
+from spexis.model_executor.layers.layernorm import RMSNorm
 
 
 @dataclass

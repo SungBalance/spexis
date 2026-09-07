@@ -35,12 +35,12 @@ from typing import Optional
 
 from transformers import PreTrainedTokenizerBase
 
-from vllm import LLM, SamplingParams
-from vllm.engine.arg_utils import EngineArgs
-from vllm.utils import FlexibleArgumentParser
+from spexis import LLM, SamplingParams
+from spexis.engine.arg_utils import EngineArgs
+from spexis.utils import FlexibleArgumentParser
 
 try:
-    from vllm.transformers_utils.tokenizer import get_tokenizer
+    from spexis.transformers_utils.tokenizer import get_tokenizer
 except ImportError:
     from backend_request_func import get_tokenizer
 

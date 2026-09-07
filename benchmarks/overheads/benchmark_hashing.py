@@ -3,8 +3,8 @@
 import cProfile
 import pstats
 
-from vllm import LLM, SamplingParams
-from vllm.utils import FlexibleArgumentParser
+from spexis import LLM, SamplingParams
+from spexis.utils import FlexibleArgumentParser
 
 # A very long prompt, total number of tokens is about 15k.
 LONG_PROMPT = ["You are an expert in large language models, aren't you?"

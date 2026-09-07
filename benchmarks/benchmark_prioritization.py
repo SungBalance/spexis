@@ -9,8 +9,8 @@ from typing import Optional
 
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
-from vllm.engine.arg_utils import EngineArgs
-from vllm.utils import FlexibleArgumentParser
+from spexis.engine.arg_utils import EngineArgs
+from spexis.utils import FlexibleArgumentParser
 
 
 #Select a equi-probable random priority
@@ -73,7 +73,7 @@ def run_vllm(
     engine_args: EngineArgs,
     disable_detokenize: bool = False,
 ) -> float:
-    from vllm import LLM, SamplingParams
+    from spexis import LLM, SamplingParams
     llm = LLM(**dataclasses.asdict(engine_args))
 
     assert all(
