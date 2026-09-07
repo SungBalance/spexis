@@ -119,9 +119,9 @@ class Worker(WorkerBase):
         # Construct the model runner
         # [Spexis] speculative pipelining needs the exit-layer runner.
         runner_cls: type[GPUModelRunner] = GPUModelRunner
-        if self.vllm_config.specpipe_config.enable_specpipe:
-            from vllm.specpipe.gpu_model_runner import SpecpipeGPUModelRunner
-            runner_cls = SpecpipeGPUModelRunner
+        if self.vllm_config.spexis_config.enable_spexis:
+            from vllm.spec_parallel.gpu_model_runner import SpecParallelGPUModelRunner
+            runner_cls = SpecParallelGPUModelRunner
         self.model_runner: GPUModelRunner = runner_cls(
             self.vllm_config, self.device)
 

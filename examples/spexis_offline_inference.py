@@ -58,7 +58,7 @@ def main() -> None:
             if not os.path.exists(path):
                 raise SystemExit(f"missing exit-model artifact: {path}")
         engine_kwargs.update(
-            enable_specpipe=True,
+            enable_spexis=True,
             # Stage 0 speculates; later stages only verify.
             exit_layer=[True] + [False] * (pp_size - 1),
             exit_models=[exit_model] + ["None"] * (pp_size - 1),

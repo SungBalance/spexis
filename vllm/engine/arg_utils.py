@@ -18,7 +18,7 @@ from vllm.config import (CacheConfig, CompilationConfig, ConfigFormat,
                          KVTransferConfig, LoadConfig, LoadFormat, LoRAConfig,
                          ModelConfig, ModelImpl, ObservabilityConfig,
                          ParallelConfig, PoolerConfig, PromptAdapterConfig,
-                         SchedulerConfig, SpecPipeConfig, SpeculativeConfig,
+                         SchedulerConfig, SpexisConfig, SpeculativeConfig,
                          TaskOption, TokenizerPoolConfig, VllmConfig,
                          get_attr_docs)
 from vllm.executor.executor_base import ExecutorBase
@@ -230,8 +230,8 @@ class EngineArgs:
     use_tqdm_on_load: bool = LoadConfig.use_tqdm_on_load
 
     # [Spexis] speculative pipelining options
-    enable_specpipe: bool = False
-    sppp_ver: str = None #spepcpipe version 1.0 1.5 2.0 2.5
+    enable_spexis: bool = False
+    spexis_ver: str = None #spepcpipe version 1.0 1.5 2.0 2.5
     exit_layer: Optional[List[bool]] = None  # len = p.p.
     exit_models: Optional[List[str]] = None  # len = p.p.
     cpu_embedding_path: str = None  # path to cpu embedding weights
@@ -1043,11 +1043,11 @@ class EngineArgs:
             "scheduled (like TTTTIIIII, leaving IIIII), it will be scheduled "
             "as TTTT in one step and IIIIIIIIII in the next.")
 
-        # [Spexis] specpipe arguments
-        parser.add_argument('--enable-specpipe',
+        # [Spexis] Spexis arguments
+        parser.add_argument('--enable-spexis',
                             type=str2bool,
                             default=False,
-                            help='whether use specpipe')
+                            help='whether to enable Spexis')
 
         # List[bool] from command line
         parser.add_argument(
@@ -1086,12 +1086,12 @@ class EngineArgs:
         )
 
         parser.add_argument(
-            '--sppp-ver',
+            '--spexis-ver',
             type=str,
             choices=['0.0', '1.0', '1.5', '2.0', '2.5'],
             default=None,
             help = \
-            'Version of specpipe: 0.0(no sppp), 1.0(base sppp), 1.5(sppp+drop), 2.0(sppp+drop+lengthpred), 2.5(sppp+drop+lengthpred+addacc)'
+            'Version of the Spexis algorithm: 0.0 (disabled), 1.0 (base speculative parallel), 1.5 (+ confidence-based drop), 2.0 (+ lookahead length prediction), 2.5 (+ additional acceptance)'
         )
 
         # Single string, choice of strategies
@@ -1100,7 +1100,7 @@ class EngineArgs:
             type=str,
             choices=['greedy', 'sampling'],
             help= \
-            'verify strategy of specpipe. It should be either greedy or sampling'
+            'verify strategy of Spexis. It should be either greedy or sampling'
         )
 
         parser.add_argument(
@@ -1356,9 +1356,9 @@ class EngineArgs:
         )
 
         # [Spexis]
-        specpipe_config = SpecPipeConfig(
-            enable_specpipe=self.enable_specpipe,
-            sppp_ver=self.sppp_ver,
+        spexis_config = SpexisConfig(
+            enable_spexis=self.enable_spexis,
+            spexis_ver=self.spexis_ver,
             target_model_config=model_config,
             exit_layer=self.exit_layer,
             exit_models=self.exit_models,
@@ -1483,7 +1483,7 @@ class EngineArgs:
             device_config=device_config,
             lora_config=lora_config,
             speculative_config=speculative_config,
-            specpipe_config=specpipe_config,
+            spexis_config=spexis_config,
             load_config=load_config,
             decoding_config=decoding_config,
             observability_config=observability_config,

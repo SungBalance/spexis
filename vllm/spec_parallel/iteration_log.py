@@ -29,7 +29,7 @@ Record schema (one JSON object per line)::
     }
 
 ``sched`` is always present (zeros when nothing was scheduled); the
-speculation-only fields are omitted for non-specpipe runs.
+speculation-only fields are omitted for non-Spexis runs.
 """
 
 import json
@@ -67,7 +67,7 @@ class IterationRecord:
         }
 
     def set_spec_results(self, counts: Sequence[int]) -> None:
-        """Record verification outcomes (see specpipe_scheduler result codes)."""
+        """Record verification outcomes (see spec_parallel.scheduler result codes)."""
         correct, wrong, flush_norm, flush_drop, final_drop = counts
         self._data["spec"] = {
             "correct": correct,

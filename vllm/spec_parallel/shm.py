@@ -7,7 +7,7 @@ publishes it out-of-band through a single shared-memory segment:
 
     [ flag : 4B int32 ][ len : 4B int32 ][ payload : pickled bytes ]
 
-Writer (``ray_utils.execute_specpipe_model_ray``): spin-waits until
+Writer (``ray_utils.execute_spec_parallel_model_ray``): spin-waits until
 ``flag == 0``, writes header + payload, then sets ``flag = 1``.
 Reader (engine core via :func:`read_result_from_shm`): spin-waits until
 ``flag == 1``, copies the payload out, then resets ``flag = 0``.
@@ -21,7 +21,7 @@ import numpy as np
 
 SHM_NAME = "exitlayer_shared_mem"
 # Maximum pickled spec-output size. The writer asserts the payload fits
-# (see ray_utils.execute_specpipe_model_ray); grow this if batches get
+# (see ray_utils.execute_spec_parallel_model_ray); grow this if batches get
 # large enough to overflow 1 MiB.
 MAX_SIZE = 1024 * 1024
 FLAG_SIZE = 4

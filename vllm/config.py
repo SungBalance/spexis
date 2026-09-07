@@ -2023,10 +2023,10 @@ class DeviceConfig:
 
 
 @dataclass
-class SpecPipeConfig:
+class SpexisConfig:
     """[Spexis] Configuration for speculative pipeline parallelism."""
-    enable_specpipe: bool = False
-    sppp_ver: str = None
+    enable_spexis: bool = False
+    spexis_ver: str = None
     target_model_config: ModelConfig = None
     exit_layer: list[int] = None
     exit_models: list[str] = None
@@ -2040,14 +2040,14 @@ class SpecPipeConfig:
     logdir: str = None
 
     # --- Scheduler tuning knobs (defaults reproduce the paper setup) ---
-    # Confidence-based spec drop (sppp >= 1.5): number of confidence
+    # Confidence-based spec drop (spexis_ver >= 1.5): number of confidence
     # histogram buckets used for the per-iteration drop selection.
     confidence_buckets: int = 20
-    # Short-request extra acceleration (sppp 2.5).
+    # Short-request extra acceleration (spexis_ver 2.5).
     max_add_reqs: int = 16
     add_acc_lenidx_thre: int = 0
     add_acc_conf_thre: float = 0.5
-    # Lookahead length/memory estimation (sppp >= 2.0).
+    # Lookahead length/memory estimation (spexis_ver >= 2.0).
     mem_esti_bar: float = 0.7
     mem_estimate_margin: float = 0.95
     average_spec_acc: float = 0.8
@@ -2062,25 +2062,25 @@ class SpecPipeConfig:
     lenesti_prec: list[float] = None
  
     def __post_init__(self):
-        self.sppp_len_pred = False
+        self.spexis_len_pred = False
         if self.expect_length is None:
             self.expect_length = [4, 8, 16, 32, 64]
         if self.lenprob_threshold is None:
             self.lenprob_threshold = [0.5] * len(self.expect_length)
         if self.lenesti_prec is None:
             self.lenesti_prec = [0.727, 0.7423, 0.7709, 0.7909, 0.8164]
-        if self.enable_specpipe:
+        if self.enable_spexis:
             self.pp_size = len(self.exit_layer)
-            logger.info("SpecPipe Inference Activated!!")
+            logger.info("Spexis inference activated")
             assert len(self.exit_layer) == len(
                 self.exit_models
-            ), "specpipe exitlayer model config does not match - list len diff"
+            ), "Spexis exit-layer model config does not match - list len diff"
 
             for i in range(self.pp_size):
                 if not self.exit_layer[i]:
                     assert self.exit_models[
                         i] is not None, f"you specified model \"{self.exit_models[i]}\" for pp node[{i}], \
-                                    but pp node[{i}] is not activated for specpipe"
+                                    but pp node[{i}] is not activated for Spexis"
 
             if self.verify_strategy not in ["greedy", "sampling"]:
                 assert False, f"verify strategy should be greedy / sampling. \
@@ -2126,12 +2126,12 @@ class SpecPipeConfig:
 
                     self.exit_model_config.append(exit_model_config)
             
-            if self.sppp_ver=='2.0' or self.sppp_ver=='2.5':
-                self.sppp_len_pred = True
+            if self.spexis_ver=='2.0' or self.spexis_ver=='2.5':
+                self.spexis_len_pred = True
             else:
-                self.sppp_len_pred = False
+                self.spexis_len_pred = False
             
-            if self.sppp_len_pred:
+            if self.spexis_len_pred:
                 length_predictor_config_dict = json.load(
                     open(f"{self.length_predictor_path}/config.json", "r"))
 
@@ -2156,12 +2156,12 @@ class SpecPipeConfig:
                 self.length_predictor_config = None
 
     @classmethod
-    def from_dict(cls, dict_value: dict) -> "SpecPipeConfig":
+    def from_dict(cls, dict_value: dict) -> "SpexisConfig":
         """Parse the CLI value for the speculative config."""
         return cls(**dict_value)
 
     def __repr__(self) -> str:
-        return f"SpecPipeConfig(enabled:{self.enable_specpipe}, \
+        return f"SpexisConfig(enabled:{self.enable_spexis}, \
                 exit models: {self.exit_models}, verify strategy: {self.verify_strategy})"
 
 
@@ -3673,9 +3673,9 @@ class VllmConfig:
     speculative_config: SpeculativeConfig = field(default=None,
                                                   init=True)  # type: ignore
 
-    # [Spexis] Always present so that `specpipe_config.enable_specpipe` is
+    # [Spexis] Always present so that `spexis_config.enable_spexis` is
     # safe to read on any VllmConfig (defaults to disabled).
-    specpipe_config: SpecPipeConfig = field(default_factory=SpecPipeConfig,
+    spexis_config: SpexisConfig = field(default_factory=SpexisConfig,
                                             init=True)
 
     decoding_config: Optional[DecodingConfig] = None
@@ -3844,11 +3844,11 @@ class VllmConfig:
             self.cache_config.verify_with_parallel_config(self.parallel_config)
 
         # [Spexis] exit_layer must specify one flag per pipeline stage.
-        if self.specpipe_config.enable_specpipe:
+        if self.spexis_config.enable_spexis:
             real_pp = self.parallel_config.pipeline_parallel_size
-            specpipe_pp = len(self.specpipe_config.exit_layer)
-            assert real_pp == specpipe_pp, (
-                f"specpipe exit_layer length ({specpipe_pp}) must match "
+            spexis_pp = len(self.spexis_config.exit_layer)
+            assert real_pp == spexis_pp, (
+                f"Spexis exit_layer length ({spexis_pp}) must match "
                 f"pipeline_parallel_size ({real_pp})")
 
         if self.lora_config:
@@ -4007,7 +4007,7 @@ class VllmConfig:
         return (
             f"model={self.model_config.model!r},"
             f" speculative_config={self.speculative_config!r},"
-            f" specpipe_config={self.specpipe_config!r},"
+            f" spexis_config={self.spexis_config!r},"
             f" tokenizer={self.model_config.tokenizer!r}, "
             f"skip_tokenizer_init={self.model_config.skip_tokenizer_init},"
             f" tokenizer_mode={self.model_config.tokenizer_mode}, "

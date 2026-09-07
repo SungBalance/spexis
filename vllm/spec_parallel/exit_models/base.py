@@ -40,7 +40,7 @@ class ExitAdapterModel(nn.Module):
     ):
         super().__init__()
 
-        self.config = vllm_config.specpipe_config.exit_hf_config[pp_rank]
+        self.config = vllm_config.spexis_config.exit_hf_config[pp_rank]
         self.cache_config = vllm_config.cache_config
 
         self.padding_idx = self.config.pad_token_id

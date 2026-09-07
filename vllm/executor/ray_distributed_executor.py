@@ -627,7 +627,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
                     ]
 
             # NOTE: [Spexis] builds its own DAG in
-            # _compiled_specpipe_ray_dag rather than extending this one.
+            # _compiled_spec_parallel_ray_dag rather than extending this one.
 
             forward_dag = MultiOutputNode(outputs)
 
@@ -636,7 +636,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
             _overlap_gpu_communication=envs.
             VLLM_USE_RAY_COMPILED_DAG_OVERLAP_COMM)
 
-    def _compiled_specpipe_ray_dag(self, enable_asyncio: bool):
+    def _compiled_spec_parallel_ray_dag(self, enable_asyncio: bool):
         assert self.parallel_config.use_ray
         self._check_ray_cgraph_installation()
         from ray.dag import InputNode, MultiOutputNode
@@ -699,7 +699,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
             ]
 
             exit_model_outputs = [
-                worker.execute_specpipe_model_ray.
+                worker.execute_spec_parallel_model_ray.
                 bind(  # type: ignore[attr-defined]
                     tokens[i])
                 for i, worker in enumerate(self.pp_tp_workers[0])
@@ -716,7 +716,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
                     ]
 
                 else:
-                    assert False, 'specpipe do not support V0'
+                    assert False, 'Spexis does not support V0'
                     outputs = [
                         worker.execute_model_spmd.
                         bind(  # type: ignore[attr-defined]
@@ -735,7 +735,7 @@ class RayDistributedExecutor(DistributedExecutorBase):
                         for output in outputs
                     ]
 
-            if self.specpipe_config.enable_specpipe:
+            if self.spexis_config.enable_spexis:
                 outputs = outputs + exit_model_outputs
 
             forward_dag = MultiOutputNode(outputs)

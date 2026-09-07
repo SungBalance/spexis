@@ -16,11 +16,11 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class SpecpipeSchedulerOutput:
-    """What SpecPipeScheduler hands to the workers for one iteration.
+class SpexisSchedulerOutput:
+    """What SpexisScheduler hands to the workers for one iteration.
 
     Mirrors upstream ``SchedulerOutput`` and adds ``embeddings``: with
-    specpipe enabled the first pipeline stage has no GPU embedding table,
+    Spexis enabled the first pipeline stage has no GPU embedding table,
     so the engine core looks the tokens up on the CPU (see
     handle_inputbatch) and ships the vectors alongside the schedule.
     """
@@ -64,12 +64,12 @@ class SpecpipeSchedulerOutput:
     grammar_bitmask: Optional[npt.NDArray[np.int32]]
 
     # Input embeddings looked up on the CPU by the engine core; filled in
-    # after scheduling (see EngineCore.step_with_specpipe).
+    # after scheduling (see EngineCore.step_with_spexis).
     embeddings: Optional[torch.Tensor]
 
 
 @dataclass
-class SpecpipeSchedulerResumeHelper:
+class SpexisSchedulerResumeHelper:
     """Token ids needed to rebuild requests resumed from preemption.
 
     A resumed request must re-send its full token history, which the
@@ -84,7 +84,7 @@ class SpecpipeSchedulerResumeHelper:
     def from_request_list(
         cls,
         requests: list[Request],
-    ) -> SpecpipeSchedulerResumeHelper:
+    ) -> SpexisSchedulerResumeHelper:
         return cls(resumed_req_token_ids={
             request.request_id: request.all_token_ids
             for request in requests

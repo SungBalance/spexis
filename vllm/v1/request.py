@@ -54,16 +54,16 @@ class Request:
         self.spec_token_ids: list[int] = []
         self.num_computed_tokens = 0
 
-        # [Spexis] Speculation bookkeeping. specpipe_len counts the tokens
+        # [Spexis] Speculation bookkeeping. sp_len counts the tokens
         # appended speculatively but not yet verified; spec_result/fixed_idx
         # carry the outcome of the last verification.
-        self.specpipe_len = 0
+        self.sp_len = 0
         self.spec_result = None
         self.fixed_idx = None
         self.flush_len = None
         self.just_fixed = None
 
-        # specpipe confidence scheduling related
+        # Spexis confidence scheduling related
         self.spec_confidence_list: list[float] = []
         self.confidence_dropped = False
         self.stop_dropped = False
@@ -71,11 +71,11 @@ class Request:
         self.drop_len = 0
         self.drop_end = False
 
-        # specpipe special free/premempt logic
+        # Spexis special free/preempt logic
         self.should_preempt = False
         self.num_scheduled = 0
 
-        # specpipe post-preemption info
+        # Spexis post-preemption info
         self.postpreempt_spec_result = None
         self.postpreempt_fixed_idx = None
 
@@ -84,7 +84,7 @@ class Request:
         self.spec_success = 0
         self.spec_fail = 0
 
-        # specpipe length prediction related
+        # Spexis length prediction related
         self.predicted_len_prob = []
 
         # Multi-modal related
@@ -130,7 +130,7 @@ class Request:
     def spec_confidence(self) -> float:
         """Joint confidence of the tokens still awaiting verification."""
         spec_confidence = 1.0
-        for i in range(1, self.specpipe_len + 1):
+        for i in range(1, self.sp_len + 1):
             spec_confidence *= self.spec_confidence_list[-i]
 
         return spec_confidence
@@ -161,7 +161,7 @@ class Request:
         token_ids: int,
     ) -> int:
         '''
-        Verify specpipe spec token. Only supports greedy decoding for now.
+        Verify Spexis spec token. Only supports greedy decoding for now.
         returns bool (whether spec was right), last_idx for _output_token_ids (0 for True)
         '''
         if isinstance(token_ids, int):
@@ -188,7 +188,7 @@ class Request:
 
                     self.spec_result = None
                     self.flush_len = None
-                    self.specpipe_len = 0
+                    self.sp_len = 0
                     self.fixed_idx = 0
                     return 4
                 
@@ -197,8 +197,8 @@ class Request:
             # Validate Spec Result (Since token id is valid)
             if self.spec_result == True or self.spec_result == None:
                 # until now, support greedy decoding only!
-                if self._output_token_ids[-self.specpipe_len] == token_ids:
-                    self.specpipe_len -= 1
+                if self._output_token_ids[-self.sp_len] == token_ids:
+                    self.sp_len -= 1
 
                     self.spec_result = True
                     self.fixed_idx = 0
@@ -207,18 +207,18 @@ class Request:
                     return 0
                 else:
                     self.num_computed_tokens -= (
-                        self.specpipe_len - 1
+                        self.sp_len - 1
                     )  # at least one token was generate
                     false_spec_place = len(
-                        self._output_token_ids) - self.specpipe_len
+                        self._output_token_ids) - self.sp_len
 
-                    self._output_token_ids[-self.specpipe_len:] = [token_ids]
-                    self._all_token_ids[-self.specpipe_len:] = [token_ids]
+                    self._output_token_ids[-self.sp_len:] = [token_ids]
+                    self._all_token_ids[-self.sp_len:] = [token_ids]
 
-                    self.spec_confidence_list[-self.specpipe_len:] = [1] # set absolute confidence for target generated fixed tokens
+                    self.spec_confidence_list[-self.sp_len:] = [1] # set absolute confidence for target generated fixed tokens
 
-                    self.flush_len = self.specpipe_len - 1
-                    self.specpipe_len = 0
+                    self.flush_len = self.sp_len - 1
+                    self.sp_len = 0
                     self.just_fixed = True
                     
                     # Reset drop flags because previous speculation was wrong -> drop was invalid

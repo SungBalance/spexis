@@ -26,7 +26,7 @@ from vllm.distributed import stateless_destroy_torch_distributed_process_group
 from vllm.executor.multiproc_worker_utils import _add_prefix
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
-from vllm.specpipe.specpipe_scheduler import SpecPipeScheduler
+from vllm.spec_parallel.scheduler import SpexisScheduler
 from vllm.transformers_utils.config import (
     maybe_register_config_serialize_by_value)
 from vllm.utils import (get_exception_traceback, resolve_obj_by_qualname,
@@ -47,10 +47,10 @@ from vllm.v1.serial_utils import MsgpackDecoder, MsgpackEncoder
 from vllm.v1.structured_output import StructuredOutputManager
 from vllm.version import __version__ as VLLM_VERSION
 
-from vllm.specpipe.handle_inputbatch import (CPUInputBatch,
+from vllm.spec_parallel.handle_inputbatch import (CPUInputBatch,
                                              total_embedding_process)
-from vllm.specpipe.iteration_log import IterationLogger
-from vllm.specpipe.shm import (FLAG_SIZE, HEADER_SIZE, MAX_SIZE, SHM_NAME,
+from vllm.spec_parallel.iteration_log import IterationLogger
+from vllm.spec_parallel.shm import (FLAG_SIZE, HEADER_SIZE, MAX_SIZE, SHM_NAME,
                                read_result_from_shm)
 
 logger = init_logger(__name__)
@@ -77,13 +77,13 @@ class EngineCore:
         self.log_stats = log_stats
         # Per-iteration metrics log consumed by exp_utils/log_iter.
         self.iter_logger = IterationLogger(
-            vllm_config.specpipe_config.logdir,
-            enabled=vllm_config.specpipe_config.enable_log)
+            vllm_config.spexis_config.logdir,
+            enabled=vllm_config.spexis_config.enable_log)
 
-        self.enable_specpipe = vllm_config.specpipe_config.enable_specpipe
+        self.enable_spexis = vllm_config.spexis_config.enable_spexis
         self.spec_output_shm = None
-        if self.enable_specpipe:
-            self._init_specpipe_state(vllm_config)
+        if self.enable_spexis:
+            self._init_spexis_state(vllm_config)
 
 
         # Setup Model.
@@ -105,8 +105,8 @@ class EngineCore:
         else:
             Scheduler = vllm_config.scheduler_config.scheduler_cls
 
-        if vllm_config.specpipe_config.enable_specpipe:
-            Scheduler = SpecPipeScheduler
+        if vllm_config.spexis_config.enable_spexis:
+            Scheduler = SpexisScheduler
 
         # This warning can be removed once the V1 Scheduler interface is
         # finalized and we can maintain support for scheduler classes that
@@ -118,7 +118,7 @@ class EngineCore:
                 "compatibility may not be maintained.",
                 vllm_config.scheduler_config.scheduler_cls)
 
-        if not vllm_config.specpipe_config.enable_specpipe:
+        if not vllm_config.spexis_config.enable_spexis:
             self.scheduler: SchedulerInterface = Scheduler(
                 scheduler_config=vllm_config.scheduler_config,
                 model_config=vllm_config.model_config,
@@ -144,7 +144,7 @@ class EngineCore:
                 data_parallel_size > 1,
                 log_stats=self.log_stats,
                 parallel_config=vllm_config.parallel_config,
-                specpipe_config=vllm_config.specpipe_config)
+                spexis_config=vllm_config.spexis_config)
 
         # Setup MM Input Mapper.
         self.mm_input_cache_server = MirroredProcessingCache(
@@ -167,7 +167,7 @@ class EngineCore:
                         self.batch_queue_size)
             self.batch_queue = queue.Queue(self.batch_queue_size)
 
-            if self.enable_specpipe:
+            if self.enable_spexis:
                 self.batch_queue_for_spec = queue.Queue(self.batch_queue_size)
                 for _ in range(self.batch_queue_size):
                     self.batch_queue_for_spec.put(None)
@@ -309,7 +309,7 @@ class EngineCore:
 
         return engine_core_outputs
 
-    def step_with_specpipe(self) -> Optional[EngineCoreOutputs]:
+    def step_with_spexis(self) -> Optional[EngineCoreOutputs]:
         """Schedule and execute batches dynamically within spec | ubatch.
         [Spexis] Runs speculation one pipeline iteration ahead of the
         verification that confirms it.
@@ -349,7 +349,7 @@ class EngineCore:
                 rec["max_dropped_confidence"] = max_dropped_confidence
 
                 (true_output_future, spec_output_future
-                 ) = self.model_executor.execute_specpipe_model(
+                 ) = self.model_executor.execute_spec_parallel_model(
                      scheduler_output)
 
                 self.batch_queue_for_spec.put_nowait(
@@ -370,13 +370,13 @@ class EngineCore:
 
         return true_engine_core_outputs
 
-    def _init_specpipe_state(self, vllm_config: VllmConfig) -> None:
+    def _init_spexis_state(self, vllm_config: VllmConfig) -> None:
         """Set up the shared-memory channel and the CPU embedding table.
 
         The stage-0 worker publishes exit-layer output through a shared
-        memory segment (see vllm/specpipe/shm.py); the segment is created
+        memory segment (see vllm/spec_parallel/shm.py); the segment is created
         here, before the workers attach to it. The first pipeline stage has
-        no GPU embedding table under specpipe, so the token embeddings are
+        no GPU embedding table under Spexis, so the token embeddings are
         loaded here and pinned for fast host-to-device transfer.
         """
         # A stale segment can survive a crashed run; drop it first.
@@ -395,12 +395,12 @@ class EngineCore:
         zero = np.array([0], dtype=np.int32).view(np.uint8)
         self.np_shm_buffer[0:FLAG_SIZE] = zero
         self.np_shm_buffer[FLAG_SIZE:FLAG_SIZE + HEADER_SIZE] = zero
-        logger.info("Initialized specpipe shared memory segment %s (%d bytes)",
+        logger.info("Initialized Spexis shared memory segment %s (%d bytes)",
                     SHM_NAME, MAX_SIZE)
 
         # Checkpoint holding just the target model's embedding weights; see
         # the exit-model artifacts in the README.
-        weights = torch.load(vllm_config.specpipe_config.cpu_embedding_path,
+        weights = torch.load(vllm_config.spexis_config.cpu_embedding_path,
                              map_location="cpu")
         embed_tokens = weights["embed_tokens.weight"].cpu()
         # Match the model dtype and pin so the per-iteration lookup can be
@@ -488,8 +488,8 @@ class EngineCoreProc(EngineCore):
         super().__init__(vllm_config, executor_class, log_stats)
 
         # [Spexis] speculative pipelining drives its own step function.
-        if vllm_config.specpipe_config.enable_specpipe:
-            self.step_fn = self.step_with_specpipe
+        if vllm_config.spexis_config.enable_spexis:
+            self.step_fn = self.step_with_spexis
         elif self.batch_queue is None:
             self.step_fn = self.step
         else:

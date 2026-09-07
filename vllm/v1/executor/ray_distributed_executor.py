@@ -64,7 +64,7 @@ class RayDistributedExecutor(RayDistributedExecutorV0, Executor):
     # [Spexis] launch the target model and the exit layer as one DAG and
     # hand back both output futures (see executor/ray_distributed_executor
     # for the DAG construction).
-    def execute_specpipe_model(
+    def execute_spec_parallel_model(
         self,
         scheduler_output,
     ) -> Union[ModelRunnerOutput, Future[ModelRunnerOutput]]:
@@ -78,19 +78,19 @@ class RayDistributedExecutor(RayDistributedExecutorV0, Executor):
         """
         # Build the compiled DAG for the first time.
         if self.forward_dag is None:  # type: ignore
-            self.forward_dag = self._compiled_specpipe_ray_dag(
+            self.forward_dag = self._compiled_spec_parallel_ray_dag(
                 enable_asyncio=False)
 
         refs = self.forward_dag.execute(scheduler_output)  # type: ignore
 
         # When PP is not used, we block here until the result is available.
         if self.max_concurrent_batches == 1:
-            # specpipe is implemented for pp only
+            # Spexis is implemented for pp only
             raise NotImplementedError
 
         # When PP is used, we return a FutureWrapper immediately so that
         # the scheduler can yield to the next batch.
         return FutureWrapper(refs[0]), FutureWrapper(
             refs[self.parallel_config.tensor_parallel_size * 1 +
-                 0])  # only supports specpipe for gpu 1 now
+                 0])  # only supports Spexis for gpu 1 now
 

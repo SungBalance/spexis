@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """CPU-side embedding batch bookkeeping for the Spexis engine core.
 
-With specpipe enabled, the first pipeline rank does not hold GPU embedding
+With Spexis enabled, the first pipeline rank does not hold GPU embedding
 weights (see the ``embed_tokens`` gate in models/llama.py, qwen2.py);
 instead the engine-core process performs the embedding lookup on CPU and
 ships the vectors to the worker inside the scheduler output. To do that,
@@ -15,9 +15,9 @@ import torch
 import itertools
 import time
 
-from vllm.specpipe.iteration_log import IterationRecord
-from vllm.specpipe.sched_output import (SpecpipeSchedulerOutput,
-                                        SpecpipeSchedulerResumeHelper)
+from vllm.spec_parallel.iteration_log import IterationRecord
+from vllm.spec_parallel.sched_output import (SpexisSchedulerOutput,
+                                        SpexisSchedulerResumeHelper)
 
 
 class CPUInputBatch:
@@ -90,7 +90,7 @@ class CPUInputBatch:
     
 
 def update_states(input_batch: "CPUInputBatch",
-                  scheduler_output: "SpecpipeSchedulerOutput") -> None:
+                  scheduler_output: "SpexisSchedulerOutput") -> None:
     """Mirror the scheduler output onto the CPU persistent batch.
 
     Keeps ``input_batch``'s request->index mapping in sync with what the
@@ -164,8 +164,8 @@ def update_states(input_batch: "CPUInputBatch",
 
 def reorder_token_ids(
     input_batch: "CPUInputBatch",
-    scheduler_output: "SpecpipeSchedulerOutput",
-    resume_helper: "SpecpipeSchedulerResumeHelper"
+    scheduler_output: "SpexisSchedulerOutput",
+    resume_helper: "SpexisSchedulerResumeHelper"
 ) -> torch.Tensor:
     """Collect this step's token ids in the batch's request-index order."""
     ordered_tokens_by_req = [None] * input_batch.num_reqs
@@ -195,11 +195,11 @@ def reorder_token_ids(
 
 
 def total_embedding_process(
-    scheduler_output: "SpecpipeSchedulerOutput",
+    scheduler_output: "SpexisSchedulerOutput",
     input_batch: "CPUInputBatch",
     embed_tokens: torch.Tensor,
     rec: "IterationRecord",
-    resume_helper: "SpecpipeSchedulerResumeHelper",
+    resume_helper: "SpexisSchedulerResumeHelper",
 ) -> None:
     """Assemble this step's input embeddings on the CPU.
 

@@ -4,7 +4,7 @@
 ``Qwen3Attention``/``Qwen3DecoderLayer`` are copied from
 ``vllm/model_executor/models/qwen3.py`` (upstream v0.8.4) with the MLP
 block removed — adapter decoder layers are attention-only. The adapter
-body itself lives in :class:`vllm.specpipe.exit_models.base.ExitAdapterModel`.
+body itself lives in :class:`vllm.spec_parallel.exit_models.base.ExitAdapterModel`.
 """
 from typing import Optional, Tuple
 

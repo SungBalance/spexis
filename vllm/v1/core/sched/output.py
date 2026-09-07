@@ -63,7 +63,7 @@ class CachedRequestData:
 
     # [Spexis] Speculation state carried to the worker: False marks a
     # rejected speculation, and fixed_idx points at the corrected token.
-    # Defaulted so non-specpipe scheduling is unaffected.
+    # Defaulted so vanilla (non-Spexis) scheduling is unaffected.
     spec_result: bool = True
     fixed_idx: int = -1
 

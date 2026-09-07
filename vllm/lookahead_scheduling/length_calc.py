@@ -7,7 +7,7 @@ per pipeline iteration while a rejection costs a rollback of several
 iterations. ``ExpGenLenCache``/``LenProbCache`` memoize the resulting
 combinatorial sums; ``calculate_peak_mem`` combines them with per-request
 remaining-length predictions to project KV usage (in tokens) over future
-iterations. Used by SpecPipeScheduler (sppp >= 2.0) to delay prefill
+iterations. Used by SpexisScheduler (spexis_ver >= 2.0) to delay prefill
 admission when the projected peak would overflow.
 
 Indexing convention: cache tables are addressed with ``num_iter - 1`` and

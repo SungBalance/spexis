@@ -42,22 +42,22 @@ class ExitLayerModel(nn.Module):
         self.vllm_config = vllm_config
 
         self.load_config = vllm_config.load_config
-        self.specpipe_config = vllm_config.specpipe_config
+        self.spexis_config = vllm_config.spexis_config
 
         # lazy initializing AdapterModel
-        self.hf_config = vllm_config.specpipe_config.exit_hf_config[pp_rank]
+        self.hf_config = vllm_config.spexis_config.exit_hf_config[pp_rank]
         self.cache_config = vllm_config.cache_config
         self.device_config = vllm_config.device_config
 
         self.pp_rank = pp_rank
 
         self.model_class = None
-        if self.specpipe_config.exit_model_type == 'qwen':
+        if self.spexis_config.exit_model_type == 'qwen':
             self.model_class=QwenAdapterModel
-        elif self.specpipe_config.exit_model_type == 'llama':
+        elif self.spexis_config.exit_model_type == 'llama':
             self.model_class=LlamaAdapterModel
         else:
-            assert False, f"Didn't implemented {self.specpipe_config.exit_model_type} adapter model"
+            assert False, f"Didn't implemented {self.spexis_config.exit_model_type} adapter model"
 
         self.unpadded_vocab_size = self.hf_config.vocab_size
 
@@ -80,7 +80,7 @@ class ExitLayerModel(nn.Module):
 
         self.model = loader.load_exitmodel(
             vllm_config=self.vllm_config,
-            model_config=self.specpipe_config.exit_model_config[self.pp_rank],
+            model_config=self.spexis_config.exit_model_config[self.pp_rank],
             device_config=self.device_config,
             pp_rank=self.pp_rank,
             model_class=self.model_class,

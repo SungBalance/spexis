@@ -74,9 +74,9 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         self.speculative_config = vllm_config.speculative_config
         self.prompt_adapter_config = vllm_config.prompt_adapter_config
         self.observability_config = vllm_config.observability_config
-        # [Spexis] see vllm/specpipe/gpu_model_runner.py for the
+        # [Spexis] see vllm/spec_parallel/gpu_model_runner.py for the
         # speculative-pipeline subclass that overrides the input path.
-        self.specpipe_config = vllm_config.specpipe_config
+        self.spexis_config = vllm_config.spexis_config
 
         from vllm.model_executor.models.utils import set_cpu_offload_max_bytes
         set_cpu_offload_max_bytes(
@@ -989,15 +989,15 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             indices=list(struct_out_req_batch_indices.values()),
         )
 
-    # [Spexis] hooks overridden by SpecpipeGPUModelRunner; the base class
+    # [Spexis] hooks overridden by SpecParallelGPUModelRunner; the base class
     # keeps them as no-ops so the vanilla path is unchanged.
-    enable_specpipe = False
+    enable_spexis = False
 
-    def _load_specpipe_models(self) -> None:
+    def _load_spexis_models(self) -> None:
         """Load speculative-pipeline submodels (exit layer, predictor)."""
         return None
 
-    def _profile_specpipe_run(self):
+    def _profile_spec_parallel_run(self):
         """Dummy-run the exit layer during profiling."""
         return None, None
 
@@ -1308,8 +1308,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                 self.drafter.load_model(self.model)
 
             # [Spexis] load the exit layer inside the profiler block so
-            # model_memory_usage covers it too (no-op without specpipe).
-            self._load_specpipe_models()
+            # model_memory_usage covers it too (no-op without Spexis).
+            self._load_spexis_models()
 
             time_after_load = time.perf_counter()
         self.model_memory_usage = m.consumed_memory
@@ -1441,7 +1441,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             else:
                 input_ids = self.input_ids[:num_tokens]
                 inputs_embeds = None
-                if self.enable_specpipe and get_pp_group().is_first_rank:
+                if self.enable_spexis and get_pp_group().is_first_rank:
                     # [Spexis] the first stage is fed CPU-computed
                     # embeddings rather than token ids.
                     inputs_embeds = self.inputs_embeds[:num_tokens]
@@ -1624,8 +1624,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             sampler_output = None
 
         # [Spexis] profile the exit layer here as well so KV-cache sizing
-        # accounts for it (no-op without specpipe).
-        sp_hidden_states, sp_sampler_output = self._profile_specpipe_run()
+        # accounts for it (no-op without Spexis).
+        sp_hidden_states, sp_sampler_output = self._profile_spec_parallel_run()
 
         torch.cuda.synchronize()
         del hidden_states, sampler_output, sp_hidden_states, sp_sampler_output

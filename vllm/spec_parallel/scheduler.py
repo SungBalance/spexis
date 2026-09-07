@@ -8,15 +8,15 @@ from collections.abc import Iterable
 from typing import Optional, Union
 
 from vllm.config import (CacheConfig, LoRAConfig, ModelConfig, ParallelConfig,
-                         SchedulerConfig, SpeculativeConfig, SpecPipeConfig)
+                         SchedulerConfig, SpeculativeConfig, SpexisConfig)
 from vllm.logger import init_logger
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
-from vllm.specpipe.length_calc import (ExpGenLenCache, LenProbCache,
+from vllm.lookahead_scheduling.length_calc import (ExpGenLenCache, LenProbCache,
                                        calculate_peak_mem)
-from vllm.specpipe.sched_output import (SpecpipeSchedulerOutput,
-                                        SpecpipeSchedulerResumeHelper)
-from vllm.specpipe.specpipe_kv_cache_manager import SPKVCacheManager
-from vllm.specpipe.stop_check import (check_stop_from_spec,
+from vllm.spec_parallel.sched_output import (SpexisSchedulerOutput,
+                                        SpexisSchedulerResumeHelper)
+from vllm.spec_parallel.kv_cache_manager import SPKVCacheManager
+from vllm.spec_parallel.stop_check import (check_stop_from_spec,
                                       check_stop_from_validation)
 from vllm.v1.core.encoder_cache_manager import (EncoderCacheManager,
                                                 compute_encoder_budget)
@@ -35,20 +35,20 @@ logger = init_logger(__name__)
 
 
 
-class SpecPipeScheduler(SchedulerInterface):
+class SpexisScheduler(SchedulerInterface):
     """Scheduler for speculative pipeline parallelism (Spexis).
 
     Differences from the upstream V1 scheduler:
     - Two-phase updates per pipeline iteration: update_from_spec_output
       ingests exit-layer (draft) tokens; update_from_true_output verifies
       them against the target model and rolls back mismatches.
-    - Confidence-based spec drop (sppp >= 1.5): per-iteration bucket sort
+    - Confidence-based spec drop (spexis_ver >= 1.5): per-iteration bucket sort
       by draft confidence; only the top (1 - drop_ratio) fraction keeps
-      speculating, plus optional short-request acceleration (sppp 2.5).
-    - Lookahead prefill admission (sppp >= 2.0): projected peak KV usage
+      speculating, plus optional short-request acceleration (spexis_ver 2.5).
+    - Lookahead prefill admission (spexis_ver >= 2.0): projected peak KV usage
       (see length_calc) delays new prefills that would overflow memory.
 
-    schedule() returns (SpecpipeSchedulerOutput, resume_helper,
+    schedule() returns (SpexisSchedulerOutput, resume_helper,
     max_dropped_confidence, len_estimate_time).
     """
 
@@ -64,7 +64,7 @@ class SpecPipeScheduler(SchedulerInterface):
                  include_finished_set: bool = False,
                  log_stats: bool = False,
                  parallel_config: ParallelConfig = None,
-                 specpipe_config: SpecPipeConfig = None) -> None:
+                 spexis_config: SpexisConfig = None) -> None:
         self.scheduler_config = scheduler_config
         self.cache_config = cache_config
         self.lora_config = lora_config
@@ -72,15 +72,15 @@ class SpecPipeScheduler(SchedulerInterface):
         self.log_stats = log_stats
         self.structured_output_manager = structured_output_manager
 
-        self.sppp_len_pred = specpipe_config.sppp_len_pred
-        self.sppp_ver = specpipe_config.sppp_ver
+        self.spexis_len_pred = spexis_config.spexis_len_pred
+        self.spexis_ver = spexis_config.spexis_ver
         # Absolute confidence cutoff (0-1) for spec dropping; unused when
         # drop_ratio drives relative dropping.
-        self.confidence_threshold = specpipe_config.confidence_threshold
+        self.confidence_threshold = spexis_config.confidence_threshold
         # Fraction (0-1) of the batch dropped from speculation each
         # iteration, lowest confidence first.
-        self.drop_ratio = specpipe_config.drop_ratio
-        self.specpipe_pp_size = parallel_config.pipeline_parallel_size
+        self.drop_ratio = spexis_config.drop_ratio
+        self.pp_size = parallel_config.pipeline_parallel_size
 
         # include_finished_set controls whether a separate set of finished
         # request ids should be included in the EngineCoreOutputs returned
@@ -108,25 +108,25 @@ class SpecPipeScheduler(SchedulerInterface):
         # Priority queues for requests.
         self.waiting: deque[Request] = deque()
 
-        # Lookahead-scheduling knobs; values come from SpecPipeConfig
+        # Lookahead-scheduling knobs; values come from SpexisConfig
         # (its defaults reproduce the paper setup).
-        self.mem_esti_bar = specpipe_config.mem_esti_bar
-        self.mem_estimate_margin = specpipe_config.mem_estimate_margin
-        self.average_spec_acc = specpipe_config.average_spec_acc
-        self.max_iter = specpipe_config.max_estimate_iter
+        self.mem_esti_bar = spexis_config.mem_esti_bar
+        self.mem_estimate_margin = spexis_config.mem_estimate_margin
+        self.average_spec_acc = spexis_config.average_spec_acc
+        self.max_iter = spexis_config.max_estimate_iter
         self.iter_list = list(
-            range(specpipe_config.estimate_iter_stride, self.max_iter + 1,
-                  specpipe_config.estimate_iter_stride))
-        self.expect_length = specpipe_config.expect_length
-        self.lenprob_threshold = specpipe_config.lenprob_threshold
-        self.lenesti_prec = specpipe_config.lenesti_prec
-        self.num_conf_buckets = specpipe_config.confidence_buckets
-        self.prefill_reserve_blocks = specpipe_config.prefill_reserve_blocks
-        if self.sppp_len_pred:
+            range(spexis_config.estimate_iter_stride, self.max_iter + 1,
+                  spexis_config.estimate_iter_stride))
+        self.expect_length = spexis_config.expect_length
+        self.lenprob_threshold = spexis_config.lenprob_threshold
+        self.lenesti_prec = spexis_config.lenesti_prec
+        self.num_conf_buckets = spexis_config.confidence_buckets
+        self.prefill_reserve_blocks = spexis_config.prefill_reserve_blocks
+        if self.spexis_len_pred:
             self.expect_gen_len_cache = ExpGenLenCache(
-                self.max_iter, self.specpipe_pp_size, self.average_spec_acc)
+                self.max_iter, self.pp_size, self.average_spec_acc)
             self.len_prob_cache = LenProbCache(
-                self.max_iter, self.specpipe_pp_size, self.average_spec_acc,
+                self.max_iter, self.pp_size, self.average_spec_acc,
                 self.expect_length)
         else:
             self.expect_gen_len_cache = None
@@ -135,14 +135,14 @@ class SpecPipeScheduler(SchedulerInterface):
         # In-flight (scheduled at least once, not finished) requests.
         self.running_scheduled: list[Request] = []
 
-        # Short-request extra acceleration (sppp 2.5) knobs.
-        self.enable_add_acc = self.sppp_ver == "2.5"
-        self.max_add_reqs = specpipe_config.max_add_reqs
-        self.add_acc_lenidx_thre = specpipe_config.add_acc_lenidx_thre
-        self.add_acc_conf_thre = specpipe_config.add_acc_conf_thre
+        # Short-request extra acceleration (spexis_ver 2.5) knobs.
+        self.enable_add_acc = self.spexis_ver == "2.5"
+        self.max_add_reqs = spexis_config.max_add_reqs
+        self.add_acc_lenidx_thre = spexis_config.add_acc_lenidx_thre
+        self.add_acc_conf_thre = spexis_config.add_acc_conf_thre
 
-        logger.info("SpecPipeScheduler: sppp_ver=%s, len_pred=%s, add_acc=%s",
-                    self.sppp_ver, self.sppp_len_pred, self.enable_add_acc)
+        logger.info("SpexisScheduler: spexis_ver=%s, len_pred=%s, add_acc=%s",
+                    self.spexis_ver, self.spexis_len_pred, self.enable_add_acc)
         
         # Requests marked for preemption whose in-flight iterations have not
         # drained yet (see _preempt_request).
@@ -439,7 +439,7 @@ class SpecPipeScheduler(SchedulerInterface):
                 else:
 
                     request.confidence_dropped = True
-                    request.drop_len =  request.specpipe_len
+                    request.drop_len =  request.sp_len
 
                     req_index += 1
                     pass
@@ -453,7 +453,7 @@ class SpecPipeScheduler(SchedulerInterface):
         delay_prefill = False
         len_estimate_time=0
         # scheme 2.0
-        if self.sppp_len_pred:
+        if self.spexis_len_pred:
             len_estimate_start_time = time.perf_counter()
             if not preempted_reqs:
                 if len(self.waiting) > 0 and token_budget > 0 and self.kv_cache_manager.usage > self.mem_esti_bar:
@@ -623,7 +623,7 @@ class SpecPipeScheduler(SchedulerInterface):
             ) for req in scheduled_running_specpp_reqs
         ]
 
-        scheduler_output = SpecpipeSchedulerOutput(
+        scheduler_output = SpexisSchedulerOutput(
             scheduled_new_reqs=new_reqs_data,
             scheduled_cached_reqs=resumed_reqs_data +
             running_flushed_reqs_data + running_specpp_reqs_data,
@@ -643,7 +643,7 @@ class SpecPipeScheduler(SchedulerInterface):
             embeddings=None, # will be updated later in core.py
         )
 
-        resume_helper = SpecpipeSchedulerResumeHelper.from_request_list(scheduled_resumed_reqs)
+        resume_helper = SpexisSchedulerResumeHelper.from_request_list(scheduled_resumed_reqs)
 
         # Advance the number of computed tokens for the request AFTER
         # the request is scheduled.
@@ -702,7 +702,7 @@ class SpecPipeScheduler(SchedulerInterface):
 
     def update_from_output(
         self,
-        scheduler_output: SpecpipeSchedulerOutput,
+        scheduler_output: SpexisSchedulerOutput,
         model_runner_output: ModelRunnerOutput,
     ) -> EngineCoreOutputs:
         raise NotImplementedError
@@ -765,7 +765,7 @@ class SpecPipeScheduler(SchedulerInterface):
 
     def update_from_spec_output(
         self,
-        scheduler_output: SpecpipeSchedulerOutput,
+        scheduler_output: SpexisSchedulerOutput,
         model_runner_output: ModelRunnerOutput,
     ) -> EngineCoreOutputs:
         sampled_token_ids = model_runner_output.sampled_token_ids
@@ -808,11 +808,11 @@ class SpecPipeScheduler(SchedulerInterface):
             # to return empty token ids for the request.
             for num_new, output_token_id in enumerate(new_token_ids, 0):
                 request.append_output_token_ids(output_token_id, generated_spec_confidence[num_new], predicted_len_prob)
-                request.specpipe_len += 1
+                request.sp_len += 1
                 stopped = check_stop_from_spec(request, self.max_model_len)
                 if stopped:
                     request.stop_dropped = True
-                    request.drop_len = request.specpipe_len
+                    request.drop_len = request.sp_len
 
             if new_token_ids and request.use_structured_output:
                 # NOTE: structured_output_request
@@ -852,7 +852,7 @@ class SpecPipeScheduler(SchedulerInterface):
 
     def update_from_true_output(
         self,
-        scheduler_output: SpecpipeSchedulerOutput,
+        scheduler_output: SpexisSchedulerOutput,
         model_runner_output: ModelRunnerOutput,
     ) -> EngineCoreOutputs:
         '''
@@ -1042,7 +1042,7 @@ class SpecPipeScheduler(SchedulerInterface):
             return False
         
         # re-initialize request
-        request.specpipe_len = 0
+        request.sp_len = 0
         request.spec_result = None
         request.fixed_idx = None
         request.flush_len = None

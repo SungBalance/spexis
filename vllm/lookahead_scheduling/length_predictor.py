@@ -93,8 +93,8 @@ class LengthPredictorWrapper(nn.Module):
         self.vllm_config = vllm_config
 
         # lazy initializing LengthPredictor
-        self.model_config_dict = vllm_config.specpipe_config.length_predictor_config
-        self.model_path = vllm_config.specpipe_config.length_predictor_path
+        self.model_config_dict = vllm_config.spexis_config.length_predictor_config
+        self.model_path = vllm_config.spexis_config.length_predictor_path
 
         self.load_config = vllm_config.load_config
         self.device_config = vllm_config.device_config

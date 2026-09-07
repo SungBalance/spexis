@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Stop-condition checks for the two-phase specpipe update cycle.
+"""Stop-condition checks for the two-phase Spexis update cycle.
 
 Upstream's ``check_stop`` assumes the last output token is final. Under
 speculative pipelining a token is appended when the exit layer produces
@@ -11,7 +11,7 @@ it, so stopping is checked twice with different rules:
   ``request.status`` untouched, because the token may still be rejected;
   the scheduler records this as a "stop drop" instead.
 * :func:`check_stop_from_validation` runs after verification. It looks
-  back past the ``specpipe_len`` still-unverified tokens to the token
+  back past the ``sp_len`` still-unverified tokens to the token
   being verified, and commits the finished status.
 """
 
@@ -37,15 +37,15 @@ def check_stop_from_spec(request: Request, max_model_len: int) -> bool:
 
 def check_stop_from_validation(request: Request, max_model_len: int) -> bool:
     """Does the just-verified token stop the request? (commits the status)"""
-    if ((request.num_tokens - request.specpipe_len) >= max_model_len
+    if ((request.num_tokens - request.sp_len) >= max_model_len
             or (request.num_output_tokens -
-                request.specpipe_len) >= request.max_tokens):
+                request.sp_len) >= request.max_tokens):
         request.status = RequestStatus.FINISHED_LENGTH_CAPPED
         return True
 
     sampling_params = request.sampling_params
     # Skip the tokens that are still speculative and unverified.
-    last_token_idx = request.specpipe_len + 1
+    last_token_idx = request.sp_len + 1
     last_token_id = request.output_token_ids[-last_token_idx]
 
     if (not sampling_params.ignore_eos

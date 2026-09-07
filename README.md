@@ -29,14 +29,15 @@ pipeline and tensor parallelism.
 
 | Component | Where |
 |---|---|
-| Speculative pipeline scheduler (drop policy, lookahead admission) | `vllm/specpipe/specpipe_scheduler.py` |
-| Early-exit draft models (Llama / Qwen adapters) | `vllm/specpipe/exit_models/` |
-| Model runner that runs target model + exit layer together | `vllm/specpipe/gpu_model_runner.py` |
-| Generation-length predictor and peak-KV projection | `vllm/specpipe/length_predictor.py`, `length_calc.py` |
-| KV manager that keeps unverified tokens out of the prefix cache | `vllm/specpipe/specpipe_kv_cache_manager.py` |
-| Per-iteration metrics log | `vllm/specpipe/iteration_log.py` |
+| Speculative pipeline scheduler (drop policy, lookahead admission) | `vllm/spec_parallel/scheduler.py` |
+| Early-exit draft models (Llama / Qwen adapters) | `vllm/spec_parallel/exit_models/` |
+| Model runner that runs target model + exit layer together | `vllm/spec_parallel/gpu_model_runner.py` |
+| Generation-length predictor and peak-KV projection | `vllm/lookahead_scheduling/length_predictor.py`, `length_calc.py` |
+| KV manager that keeps unverified tokens out of the prefix cache | `vllm/spec_parallel/kv_cache_manager.py` |
+| Per-iteration metrics log | `vllm/spec_parallel/iteration_log.py` |
 
-Everything Spexis adds lives in `vllm/specpipe/`. Where upstream vLLM files
+Everything Spexis adds lives in `vllm/spec_parallel/` and
+`vllm/lookahead_scheduling/`. Where upstream vLLM files
 had to be touched, the changed regions are marked with `[Spexis]`, so
 `grep -rn "\[Spexis\]" vllm/` shows the full integration surface.
 
@@ -103,7 +104,7 @@ server, e.g.:
 ```bash
 vllm serve /path/to/Llama-3.3-70B-Instruct \
     --pipeline-parallel-size 2 --distributed-executor-backend ray \
-    --enable-specpipe True \
+    --enable-spexis True \
     --exit-layer True False \
     --exit-models /path/to/exitmodels/.../exit_1_2 None \
     --cpu-embedding-path /path/to/exitmodels/.../embed_tokens.bin \
@@ -120,13 +121,13 @@ Key options:
 
 | Option | Meaning |
 |---|---|
-| `--enable-specpipe` | Turn on speculative pipelining |
+| `--enable-spexis` | Turn on speculative pipelining |
 | `--exit-layer` | Per-stage flag: does this stage run an exit model? |
 | `--exit-models` | Per-stage exit model path (`None` if the stage has no exit model) |
 | `--cpu-embedding-path` | Target model embedding weights, looked up on the CPU |
 | `--exit-model-type` | `llama` or `qwen` |
 | `--drop-ratio` | Fraction of the batch dropped from speculation each iteration, lowest confidence first |
-| `--sppp-ver` | `2.0`/`2.5` enable lookahead scheduling (needs `--length-predictor-path`) |
+| `--spexis-ver` | `2.0`/`2.5` enable lookahead scheduling (needs `--length-predictor-path`) |
 | `--enable-log`, `--logdir` | Write the per-iteration metrics log (JSONL) |
 
 ### Troubleshooting
@@ -142,7 +143,7 @@ Key options:
 This is a research prototype released alongside the paper, not a
 production serving stack. It is being cleaned up in stages:
 
-- [x] Core system (`vllm/specpipe/` and its engine integration)
+- [x] Core system (`vllm/spec_parallel/`, `vllm/lookahead_scheduling/` and their engine integration)
 - [x] Trimmed to the CUDA-only surface the paper uses (Llama/Qwen families)
 - [ ] Experiment and reproduction scripts
 - [ ] Exit-model artifacts and the code that trains them

@@ -20,7 +20,7 @@ from vllm.sequence import ExecuteModelRequest, IntermediateTensors
 from vllm.utils import get_ip
 from vllm.distributed.parallel_state import get_tp_group
 from vllm.worker.worker_base import WorkerWrapperBase
-from vllm.specpipe.shm import SHM_NAME, MAX_SIZE, FLAG_SIZE, HEADER_SIZE
+from vllm.spec_parallel.shm import SHM_NAME, MAX_SIZE, FLAG_SIZE, HEADER_SIZE
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import SchedulerOutput
@@ -55,7 +55,7 @@ try:
             # its shared-memory channel to publish exit-layer output. On
             # other nodes the segment does not exist; those ranks never
             # write to it (only the stage-0 TP-local rank does).
-            if kwargs["vllm_config"].specpipe_config.enable_specpipe:
+            if kwargs["vllm_config"].spexis_config.enable_spexis:
                 try:
                     self.spec_output_shm = shared_memory.SharedMemory(
                         name=SHM_NAME)
@@ -67,12 +67,12 @@ try:
                         (MAX_SIZE, ),
                         dtype=np.uint8,
                         buffer=self.spec_output_shm.buf)
-                    logger.info("Attached to specpipe shared memory %s",
+                    logger.info("Attached to Spexis shared memory %s",
                                 SHM_NAME)
                 else:
                     self.np_shm_buffer = []
                     logger.info(
-                        "No specpipe shared memory on this node; this worker "
+                        "No Spexis shared memory on this node; this worker "
                         "will not publish speculative output.")
 
 
@@ -212,7 +212,7 @@ try:
             return output
         
 
-        def execute_specpipe_model_ray(
+        def execute_spec_parallel_model_ray(
             self,
             scheduler_output: Union["SchedulerOutput",
                                     Tuple["SchedulerOutput",

@@ -27,10 +27,10 @@ from vllm.logger import init_logger
 from vllm.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from vllm.sampling_params import SamplingType
 from vllm.sequence import IntermediateTensors
-from vllm.specpipe.bool_token import BoolToken
-from vllm.specpipe.exitlayer import ExitLayerModel
-from vllm.specpipe.length_predictor import LengthPredictorWrapper
-from vllm.specpipe.sched_output import SpecpipeSchedulerOutput
+from vllm.spec_parallel.bool_token import BoolToken
+from vllm.spec_parallel.exitlayer import ExitLayerModel
+from vllm.lookahead_scheduling.length_predictor import LengthPredictorWrapper
+from vllm.spec_parallel.sched_output import SpexisSchedulerOutput
 from vllm.v1.attention.backends.flash_attn import FlashAttentionMetadata
 from vllm.v1.outputs import EMPTY_MODEL_RUNNER_OUTPUT, ModelRunnerOutput
 from vllm.v1.sample.metadata import SamplingMetadata
@@ -41,26 +41,26 @@ from vllm.v1.worker.gpu_model_runner import GPUModelRunner
 logger = init_logger(__name__)
 
 
-class SpecpipeGPUModelRunner(GPUModelRunner):
+class SpecParallelGPUModelRunner(GPUModelRunner):
     """Model runner that runs the target model and an exit layer together."""
 
-    enable_specpipe = True
+    enable_spexis = True
 
     def __init__(self, vllm_config, device: torch.device):
         super().__init__(vllm_config, device)
-        self.sppp_len_pred = self.specpipe_config.sppp_len_pred
+        self.spexis_len_pred = self.spexis_config.spexis_len_pred
 
         # Build the exit layer only on the ranks configured to speculate.
         # NOTE: rank_in_group is the pipeline stage index; combining this
         # with tensor parallelism has not been validated.
         pp_rank = get_pp_group().rank_in_group
-        if self.specpipe_config.exit_layer[pp_rank]:
+        if self.spexis_config.exit_layer[pp_rank]:
             self.exit_model = ExitLayerModel(self.vllm_config, pp_rank)
-            if self.sppp_len_pred:
+            if self.spexis_len_pred:
                 self.length_predictor = LengthPredictorWrapper(
                     self.vllm_config, pp_rank)
 
-    def _load_specpipe_models(self) -> None:
+    def _load_spexis_models(self) -> None:
         if hasattr(self, "exit_model"):
             logger.info("Loading exit layer model...")
             self.exit_model.load_model()
@@ -68,16 +68,16 @@ class SpecpipeGPUModelRunner(GPUModelRunner):
             logger.info("Loading length predictor model...")
             self.length_predictor.load_model()
 
-    def _profile_specpipe_run(self):
+    def _profile_spec_parallel_run(self):
         if not hasattr(self, "exit_model"):
             return None, None
         # NOTE: the sampler dummy run is approximate; it does not model
         # speculative decoding combined with an exit layer.
-        sp_hidden_states = self._dummy_specpipe_run(self.max_num_tokens)
+        sp_hidden_states = self._dummy_spec_parallel_run(self.max_num_tokens)
         return sp_hidden_states, self._dummy_sp_sampler_run(sp_hidden_states)
 
     def _update_states(self,
-                                scheduler_output: "SpecpipeSchedulerOutput") -> None:
+                                scheduler_output: "SpexisSchedulerOutput") -> None:
         """Update the cached states and the persistent batch with the scheduler
         output.
 
@@ -474,7 +474,7 @@ class SpecpipeGPUModelRunner(GPUModelRunner):
     @torch.inference_mode()
     def execute_target_model(
         self,
-        scheduler_output: "SpecpipeSchedulerOutput",
+        scheduler_output: "SpexisSchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, torch.Tensor]:
         torch.cuda.nvtx.range_push(msg="execute_target_model")
@@ -566,7 +566,7 @@ class SpecpipeGPUModelRunner(GPUModelRunner):
             )
         if not get_pp_group().is_last_rank:
             # For mid-pipeline stages, return the hidden states.
-            if self.specpipe_config.enable_specpipe and get_pp_group().is_first_rank:
+            if self.spexis_config.enable_spexis and get_pp_group().is_first_rank:
                 self.cached_tensors = hidden_states
             torch.cuda.nvtx.range_pop()
             return BoolToken({"tok":True})
@@ -587,7 +587,7 @@ class SpecpipeGPUModelRunner(GPUModelRunner):
     @torch.inference_mode()
     def execute_exitlayer_model(
         self,
-        scheduler_output: "SpecpipeSchedulerOutput",
+        scheduler_output: "SpexisSchedulerOutput",
         token: BoolToken
         # intermediate_tensors: "IntermediateTensors",
     ) -> Union[ModelRunnerOutput, torch.Tensor]:
@@ -639,7 +639,7 @@ class SpecpipeGPUModelRunner(GPUModelRunner):
             for k, v in self.intermediate_tensors.items()
         })
 
-        if self.sppp_len_pred:
+        if self.spexis_len_pred:
             torch.cuda.nvtx.range_push(msg="execute_predl_model")
             length_probs = self.length_predictor.model(num_input_tokens, intermediate_tensors)
             length_probs = length_probs[:num_scheduled_tokens]
@@ -722,13 +722,13 @@ class SpecpipeGPUModelRunner(GPUModelRunner):
             # No spec decode tokens.
             valid_sampled_token_ids = sampled_token_ids.tolist()
             valid_top1_probs = top1_probs.tolist()
-            if self.sppp_len_pred:
+            if self.spexis_len_pred:
                 valid_length_probs = sample_length_probs.tolist()
         # Mask out the sampled tokens that should not be sampled.
         for i in discard_sampled_tokens_req_indices:
             valid_sampled_token_ids[i].clear()
             valid_top1_probs[i].clear()
-            if self.sppp_len_pred:
+            if self.spexis_len_pred:
                 valid_length_probs[i].clear()
 
 
@@ -738,7 +738,7 @@ class SpecpipeGPUModelRunner(GPUModelRunner):
 
         torch.cuda.nvtx.range_pop()
 
-        if not self.sppp_len_pred:
+        if not self.spexis_len_pred:
             valid_length_probs = None
 
         
@@ -754,7 +754,7 @@ class SpecpipeGPUModelRunner(GPUModelRunner):
         )
 
     @torch.inference_mode()
-    def _dummy_specpipe_run(
+    def _dummy_spec_parallel_run(
         self,
         num_tokens: int,
     ) -> torch.Tensor:
@@ -777,7 +777,7 @@ class SpecpipeGPUModelRunner(GPUModelRunner):
                                             num_scheduled_tokens):
             model = self.exit_model
             if self.is_multimodal_model:
-                assert False, "Multi-Modal model is not supported for specpipe"
+                assert False, "Multi-Modal model is not supported for Spexis"
                 input_ids = None
                 inputs_embeds = self.inputs_embeds[:num_tokens]
             else:
