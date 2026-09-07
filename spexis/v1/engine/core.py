@@ -49,6 +49,7 @@ from spexis.version import __version__ as VLLM_VERSION
 
 from spexis.spec_parallel.handle_inputbatch import (CPUInputBatch,
                                              total_embedding_process)
+from spexis.spec_parallel import nvtx
 from spexis.spec_parallel.iteration_log import IterationLogger
 from spexis.spec_parallel.shm import (FLAG_SIZE, HEADER_SIZE, MAX_SIZE, SHM_NAME,
                                read_result_from_shm)
@@ -79,6 +80,8 @@ class EngineCore:
         self.iter_logger = IterationLogger(
             vllm_config.spexis_config.logdir,
             enabled=vllm_config.spexis_config.enable_log)
+        if vllm_config.spexis_config.enable_nvtx_profile:
+            nvtx.enable()
 
         self.enable_spexis = vllm_config.spexis_config.enable_spexis
         self.spec_output_shm = None
@@ -316,7 +319,7 @@ class EngineCore:
         """
         assert self.batch_queue_for_spec is not None
 
-        torch.cuda.nvtx.range_push(msg="core step")
+        nvtx.range_push(msg="core step")
         true_engine_core_outputs = None
 
         with self.iter_logger.record() as rec:
@@ -366,7 +369,7 @@ class EngineCore:
             else:
                 self.batch_queue_for_spec.put_nowait(None)
 
-        torch.cuda.nvtx.range_pop()
+        nvtx.range_pop()
 
         return true_engine_core_outputs
 
@@ -374,7 +377,7 @@ class EngineCore:
         """Set up the shared-memory channel and the CPU embedding table.
 
         The stage-0 worker publishes exit-layer output through a shared
-        memory segment (see vllm/spec_parallel/shm.py); the segment is created
+        memory segment (see spexis/spec_parallel/shm.py); the segment is created
         here, before the workers attach to it. The first pipeline stage has
         no GPU embedding table under Spexis, so the token embeddings are
         loaded here and pinned for fast host-to-device transfer.
@@ -487,7 +490,7 @@ class EngineCoreProc(EngineCore):
     ):
         super().__init__(vllm_config, executor_class, log_stats)
 
-        # [Spexis] speculative pipelining drives its own step function.
+        # [Spexis] speculative parallelism drives its own step function.
         if vllm_config.spexis_config.enable_spexis:
             self.step_fn = self.step_with_spexis
         elif self.batch_queue is None:

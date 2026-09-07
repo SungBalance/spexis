@@ -117,7 +117,7 @@ class Worker(WorkerBase):
         set_random_seed(self.model_config.seed)
 
         # Construct the model runner
-        # [Spexis] speculative pipelining needs the exit-layer runner.
+        # [Spexis] speculative parallelism needs the exit-layer runner.
         runner_cls: type[GPUModelRunner] = GPUModelRunner
         if self.vllm_config.spexis_config.enable_spexis:
             from spexis.spec_parallel.gpu_model_runner import SpecParallelGPUModelRunner

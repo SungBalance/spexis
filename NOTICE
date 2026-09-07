@@ -14,7 +14,8 @@ The following modifications were made to the original software:
     their vllm prefixes. Usage-stats reporting is disabled by default so
     the fork does not feed the upstream telemetry service.
   * Added spexis/spec_parallel/ and spexis/lookahead_scheduling/, which
-    implement speculative pipeline parallelism: early-exit draft models
+    implement speculative parallelism with lookahead scheduling:
+    early-exit draft models
     attached at pipeline-stage boundaries, a
     scheduler that overlaps speculation with normal execution and
     verifies it one iteration later, confidence-based speculation

@@ -12,6 +12,7 @@ import torch.nn as nn
 
 from spexis.attention import AttentionType, get_attn_backend
 from spexis.attention.layer import Attention
+from spexis.spec_parallel import nvtx
 from spexis.config import CompilationLevel, VllmConfig
 from spexis.distributed.parallel_state import get_pp_group, graph_capture
 from spexis.forward_context import set_forward_context
@@ -74,9 +75,11 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         self.speculative_config = vllm_config.speculative_config
         self.prompt_adapter_config = vllm_config.prompt_adapter_config
         self.observability_config = vllm_config.observability_config
-        # [Spexis] see vllm/spec_parallel/gpu_model_runner.py for the
-        # speculative-pipeline subclass that overrides the input path.
+        # [Spexis] see spexis/spec_parallel/gpu_model_runner.py for the
+        # speculative-parallel subclass that overrides the input path.
         self.spexis_config = vllm_config.spexis_config
+        if self.spexis_config.enable_nvtx_profile:
+            nvtx.enable()
 
         from spexis.model_executor.models.utils import set_cpu_offload_max_bytes
         set_cpu_offload_max_bytes(
@@ -1008,11 +1011,11 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, torch.Tensor]:
         # [Spexis] NVTX range for profiling the per-iteration GPU work.
-        torch.cuda.nvtx.range_push(msg="execute_model")
+        nvtx.range_push(msg="execute_model")
         self._update_states(scheduler_output)
         if not scheduler_output.total_num_scheduled_tokens:
             # Return empty ModelRunnerOutput if there's no work to do.
-            torch.cuda.nvtx.range_pop()
+            nvtx.range_pop()
             return EMPTY_MODEL_RUNNER_OUTPUT
 
         if self.is_multimodal_model:
@@ -1087,7 +1090,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             )
         if not get_pp_group().is_last_rank:
             # For mid-pipeline stages, return the hidden states.
-            torch.cuda.nvtx.range_pop()
+            nvtx.range_pop()
             return hidden_states
 
         hidden_states = hidden_states[:num_scheduled_tokens]
@@ -1249,7 +1252,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             # TODO(woosuk): Cache draft_probs and use it for rejection sampling
             # in the next step.
             del draft_probs
-        torch.cuda.nvtx.range_pop()
+        nvtx.range_pop()
         return ModelRunnerOutput(
             req_ids=self.input_batch.req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,

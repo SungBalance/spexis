@@ -2024,30 +2024,45 @@ class DeviceConfig:
 
 @dataclass
 class SpexisConfig:
-    """[Spexis] Configuration for speculative pipeline parallelism."""
+    """[Spexis] Configuration for speculative parallelism."""
     enable_spexis: bool = False
-    spexis_ver: str = None
+    # Spexis algorithm version. Spexis = speculative parallelism +
+    # lookahead scheduling, and the version selects how much of the
+    # lookahead-scheduling half runs (versions are cumulative):
+    #   "1.0"  speculative parallelism only -- no lookahead scheduling
+    #          (no confidence drop, no length prediction).
+    #   "2.0"  + lookahead scheduling part 1 (la_sched1): confidence-based
+    #          spec drop. Tune with --drop-ratio.
+    #   "2.5"  + lookahead scheduling part 2 (la_sched2): length-aware
+    #          scheduling (length prediction drives prefill admission and
+    #          short-request boosting). Requires --length-predictor-path.
+    # The paper's full system is "2.5".
+    spexis_ver: str = "1.0"
     target_model_config: ModelConfig = None
     exit_layer: list[int] = None
     exit_models: list[str] = None
     cpu_embedding_path: str = None
     length_predictor_path: str = None
     verify_strategy: str = None
-    confidence_threshold: float = None
-    drop_ratio: float = None
+    # Fraction (0-1) of the batch dropped from speculation each iteration,
+    # lowest confidence first (la_sched1, spexis_ver >= 2.0).
+    drop_ratio: float = 0.0
     exit_model_type: str = None
     enable_log: bool = False
     logdir: str = None
+    # Emit NVTX ranges on the hot paths for Nsight profiling.
+    enable_nvtx_profile: bool = False
 
     # --- Scheduler tuning knobs (defaults reproduce the paper setup) ---
-    # Confidence-based spec drop (spexis_ver >= 1.5): number of confidence
+    # Confidence-based spec drop (spexis_ver >= 2.0): number of confidence
     # histogram buckets used for the per-iteration drop selection.
     confidence_buckets: int = 20
-    # Short-request extra acceleration (spexis_ver 2.5).
-    max_add_reqs: int = 16
-    add_acc_lenidx_thre: int = 0
-    add_acc_conf_thre: float = 0.5
-    # Lookahead length/memory estimation (spexis_ver >= 2.0).
+    # Length-aware scheduling boost (spexis_ver 2.5): short predicted-
+    # length requests kept speculating past the drop cut.
+    la_sched2_max_reqs: int = 16
+    la_sched2_lenidx_thre: int = 0
+    la_sched2_conf_thre: float = 0.5
+    # Lookahead length/memory estimation (spexis_ver 2.5).
     mem_esti_bar: float = 0.7
     mem_estimate_margin: float = 0.95
     average_spec_acc: float = 0.8
@@ -2062,7 +2077,9 @@ class SpexisConfig:
     lenesti_prec: list[float] = None
  
     def __post_init__(self):
-        self.spexis_len_pred = False
+        # Derived lookahead-scheduling switches (see spexis_ver above).
+        self.enable_la_sched1 = False
+        self.enable_la_sched2 = False
         if self.expect_length is None:
             self.expect_length = [4, 8, 16, 32, 64]
         if self.lenprob_threshold is None:
@@ -2126,12 +2143,19 @@ class SpexisConfig:
 
                     self.exit_model_config.append(exit_model_config)
             
-            if self.spexis_ver=='2.0' or self.spexis_ver=='2.5':
-                self.spexis_len_pred = True
-            else:
-                self.spexis_len_pred = False
-            
-            if self.spexis_len_pred:
+            assert self.spexis_ver in ("1.0", "2.0", "2.5"), (
+                f"spexis_ver must be one of 1.0/2.0/2.5, got "
+                f"{self.spexis_ver!r}")
+            assert self.drop_ratio is not None and \
+                0.0 <= self.drop_ratio < 1.0, (
+                f"drop_ratio must be in [0, 1), got {self.drop_ratio!r}")
+            self.enable_la_sched1 = self.spexis_ver in ("2.0", "2.5")
+            self.enable_la_sched2 = self.spexis_ver == "2.5"
+
+            if self.enable_la_sched2:
+                assert self.length_predictor_path is not None, (
+                    "spexis_ver 2.5 (length-aware scheduling) requires "
+                    "--length-predictor-path")
                 length_predictor_config_dict = json.load(
                     open(f"{self.length_predictor_path}/config.json", "r"))
 
@@ -2162,6 +2186,7 @@ class SpexisConfig:
 
     def __repr__(self) -> str:
         return f"SpexisConfig(enabled:{self.enable_spexis}, \
+                ver: {self.spexis_ver}, \
                 exit models: {self.exit_models}, verify strategy: {self.verify_strategy})"
 
 

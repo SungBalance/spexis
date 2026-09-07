@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Minimal Spexis example: speculative pipeline parallelism, offline.
+"""Minimal Spexis example: speculative parallelism, offline.
 
 Every stage but the last runs an early-exit (draft) model in parallel with
 the target model, so speculation costs no extra KV cache. Pass one

@@ -7,14 +7,17 @@ per pipeline iteration while a rejection costs a rollback of several
 iterations. ``ExpGenLenCache``/``LenProbCache`` memoize the resulting
 combinatorial sums; ``calculate_peak_mem`` combines them with per-request
 remaining-length predictions to project KV usage (in tokens) over future
-iterations. Used by SpexisScheduler (spexis_ver >= 2.0) to delay prefill
-admission when the projected peak would overflow.
+iterations. Used by SpexisScheduler (spexis_ver 2.5, length-aware
+scheduling) to delay prefill admission when the projected peak would
+overflow.
+
+The estimate is fully expectation-based (no sampling), so it is
+deterministic for a given batch state.
 
 Indexing convention: cache tables are addressed with ``num_iter - 1`` and
 ``length - 1`` (iteration/length counts start at 1).
 """
 from math import comb
-import random as rand
 
 from spexis.v1.request import Request
 
@@ -96,37 +99,39 @@ def calculate_iter_mem(
     current_batch: list[Request],
     length_thresholds: list[int], # threshold for each tau eg) [0.5, 0.5, 0.5, 0.5, 0.5]
     expect_precision: list[float], # epsilon
-    ) -> int:
+    ) -> float:
     # TODO: APPLY should_preempt logic
 
     expect_gen_len = exp_gen_len_cache.get(num_iter)
 
-    num_finished_reqs = 0
-    sum_finished_reqlen = 0
+    # Expected number of requests that finish within num_iter iterations
+    # and the expected memory (in tokens) they release.
+    exp_finished_reqs = 0.0
+    exp_finished_reqlen = 0.0
 
     # Calculate Effective Batch
     for req in current_batch:
         remain_len_idx = req.expect_remain_len_idx(length_thresholds)
-        
+
         # If remain_length is -1, the request will not be finished in max_iter (estimation)
         if remain_len_idx == -1:
             continue
 
         prob_len = len_prob_cache.cum_prob_get(remain_len_idx, num_iter)
 
+        # Effective finish probability: P(gen len > tau) discounted by the
+        # length predictor's precision at this threshold.
         eff_prob = prob_len * expect_precision[remain_len_idx]
 
-        # Sampling makes admission stochastic across runs; the scheduler
-        # only uses the aggregate estimate, so this is a deliberate
-        # Monte-Carlo approximation of the finish probability.
-        sample = rand.random()
+        # Expectation of the finish indicator (no sampling): each request
+        # contributes its finish probability, keeping the estimate
+        # deterministic.
+        exp_finished_reqs += eff_prob
+        exp_finished_reqlen += eff_prob * req.num_tokens
 
-        # Sample to decide whether finished or not
-        if sample < eff_prob:
-            num_finished_reqs += 1
-            sum_finished_reqlen += req.num_tokens
-
-    memory = sum_req_len + (len(current_batch)-num_finished_reqs) * expect_gen_len - sum_finished_reqlen
+    memory = sum_req_len + \
+        (len(current_batch) - exp_finished_reqs) * expect_gen_len - \
+        exp_finished_reqlen
 
     return memory # Computed in Tokens
 
@@ -137,7 +142,7 @@ def calculate_peak_mem(
     current_batch: list[Request],
     length_thresholds: list[int], # threshold for each tau eg) [0.5, 0.5, 0.5, 0.5, 0.5]
     expect_precision: list[float], # epsilon
-    ) -> tuple[list[int], int, int]:
+    ) -> tuple[list[float], float, int]:
     """Calculate the peak memory across iterations."""
     ## Calculate Static Values
     # Calculate Sigma(current_length)

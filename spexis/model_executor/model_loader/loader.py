@@ -525,7 +525,7 @@ class DefaultModelLoader(BaseModelLoader):
         return model.eval()
 
     # [Spexis] loaders for the per-stage exit model and the length
-    # predictor; used only when speculative pipelining is enabled.
+    # predictor; used only when Spexis is enabled.
     def load_exitmodel(self, vllm_config, model_config, device_config, pp_rank,
                        model_class) -> nn.Module:
         target_device = torch.device(device_config.device)

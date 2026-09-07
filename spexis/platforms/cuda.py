@@ -131,7 +131,7 @@ class CudaPlatformBase(Platform):
                             "spexis.v1.worker.gpu_worker.Worker"
                 else:
                     # [Spexis] V0 speculative decoding was removed; this
-                    # fork's speculative pipelining requires the V1 engine.
+                    # fork's speculative parallelism requires the V1 engine.
                     raise NotImplementedError(
                         "Speculative decoding requires the V1 engine in "
                         "this fork. Please run with VLLM_USE_V1=1.")

@@ -2,7 +2,7 @@
 """Stop-condition checks for the two-phase Spexis update cycle.
 
 Upstream's ``check_stop`` assumes the last output token is final. Under
-speculative pipelining a token is appended when the exit layer produces
+speculative parallelism a token is appended when the exit layer produces
 it (speculatively) and only becomes final once the target model verifies
 it, so stopping is checked twice with different rules:
 

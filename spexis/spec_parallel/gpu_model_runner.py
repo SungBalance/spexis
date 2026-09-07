@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""GPU model runner for speculative pipeline parallelism (Spexis).
+"""GPU model runner for speculative parallelism (Spexis).
 
 Subclasses the upstream :class:`GPUModelRunner`, which stays responsible
 for everything a normal run does. This class adds the pieces the Spexis
@@ -27,6 +27,7 @@ from spexis.logger import init_logger
 from spexis.model_executor.layers.rotary_embedding import MRotaryEmbedding
 from spexis.sampling_params import SamplingType
 from spexis.sequence import IntermediateTensors
+from spexis.spec_parallel import nvtx
 from spexis.spec_parallel.bool_token import BoolToken
 from spexis.spec_parallel.exitlayer import ExitLayerModel
 from spexis.lookahead_scheduling.length_predictor import LengthPredictorWrapper
@@ -48,7 +49,7 @@ class SpecParallelGPUModelRunner(GPUModelRunner):
 
     def __init__(self, vllm_config, device: torch.device):
         super().__init__(vllm_config, device)
-        self.spexis_len_pred = self.spexis_config.spexis_len_pred
+        self.enable_la_sched2 = self.spexis_config.enable_la_sched2
 
         # Build the exit layer only on the ranks configured to speculate.
         # NOTE: rank_in_group is the pipeline stage index; combining this
@@ -56,7 +57,7 @@ class SpecParallelGPUModelRunner(GPUModelRunner):
         pp_rank = get_pp_group().rank_in_group
         if self.spexis_config.exit_layer[pp_rank]:
             self.exit_model = ExitLayerModel(self.vllm_config, pp_rank)
-            if self.spexis_len_pred:
+            if self.enable_la_sched2:
                 self.length_predictor = LengthPredictorWrapper(
                     self.vllm_config, pp_rank)
 
@@ -477,7 +478,7 @@ class SpecParallelGPUModelRunner(GPUModelRunner):
         scheduler_output: "SpexisSchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, torch.Tensor]:
-        torch.cuda.nvtx.range_push(msg="execute_target_model")
+        nvtx.range_push(msg="execute_target_model")
 
         
         self._update_states(scheduler_output)
@@ -568,10 +569,10 @@ class SpecParallelGPUModelRunner(GPUModelRunner):
             # For mid-pipeline stages, return the hidden states.
             if self.spexis_config.enable_spexis and get_pp_group().is_first_rank:
                 self.cached_tensors = hidden_states
-            torch.cuda.nvtx.range_pop()
+            nvtx.range_pop()
             return BoolToken({"tok":True})
 
-        torch.cuda.nvtx.range_pop()
+        nvtx.range_pop()
         return BoolToken({"tok":False})
 
     def return_hidden_state(
@@ -581,7 +582,7 @@ class SpecParallelGPUModelRunner(GPUModelRunner):
         # for k, v in token.items():
         #     token_out = v
         # assert token_out, "token was False"
-        torch.cuda.nvtx.mark(msg="return_hidden_state")
+        nvtx.mark(msg="return_hidden_state")
         return self.cached_tensors
 
     @torch.inference_mode()
@@ -598,7 +599,7 @@ class SpecParallelGPUModelRunner(GPUModelRunner):
 
         intermediate_tensors = self.cached_tensors
 
-        torch.cuda.nvtx.range_push(msg="execute_exitlayer_model")
+        nvtx.range_push(msg="execute_exitlayer_model")
         # Prepare the decoder inputs.
         attn_metadata, logits_indices, spec_decode_metadata = (
             self._prepare_inputs(scheduler_output))
@@ -639,12 +640,12 @@ class SpecParallelGPUModelRunner(GPUModelRunner):
             for k, v in self.intermediate_tensors.items()
         })
 
-        if self.spexis_len_pred:
-            torch.cuda.nvtx.range_push(msg="execute_predl_model")
+        if self.enable_la_sched2:
+            nvtx.range_push(msg="execute_predl_model")
             length_probs = self.length_predictor.model(num_input_tokens, intermediate_tensors)
             length_probs = length_probs[:num_scheduled_tokens]
             sample_length_probs = length_probs[logits_indices]
-            torch.cuda.nvtx.range_pop()
+            nvtx.range_pop()
 
 
         # Run the decoder.
@@ -659,13 +660,13 @@ class SpecParallelGPUModelRunner(GPUModelRunner):
 
         hidden_states = hidden_states[:num_scheduled_tokens]
         sample_hidden_states = hidden_states[logits_indices]
-        torch.cuda.nvtx.range_pop()
+        nvtx.range_pop()
 
-        torch.cuda.nvtx.range_push(msg='lm_head')
+        nvtx.range_push(msg='lm_head')
         logits = self.exit_model.compute_logits(sample_hidden_states, None)
-        torch.cuda.nvtx.range_pop()
+        nvtx.range_pop()
 
-        torch.cuda.nvtx.range_push(msg='remaining')
+        nvtx.range_push(msg='remaining')
         # Confidence of the drafted token = its softmax probability;
         # the scheduler multiplies these along a speculation run.
         probs = logits.softmax(dim=-1, dtype=torch.float32)
@@ -722,13 +723,13 @@ class SpecParallelGPUModelRunner(GPUModelRunner):
             # No spec decode tokens.
             valid_sampled_token_ids = sampled_token_ids.tolist()
             valid_top1_probs = top1_probs.tolist()
-            if self.spexis_len_pred:
+            if self.enable_la_sched2:
                 valid_length_probs = sample_length_probs.tolist()
         # Mask out the sampled tokens that should not be sampled.
         for i in discard_sampled_tokens_req_indices:
             valid_sampled_token_ids[i].clear()
             valid_top1_probs[i].clear()
-            if self.spexis_len_pred:
+            if self.enable_la_sched2:
                 valid_length_probs[i].clear()
 
 
@@ -736,9 +737,9 @@ class SpecParallelGPUModelRunner(GPUModelRunner):
             # Speculative decoding is not enabled.
             spec_token_ids = None
 
-        torch.cuda.nvtx.range_pop()
+        nvtx.range_pop()
 
-        if not self.spexis_len_pred:
+        if not self.enable_la_sched2:
             valid_length_probs = None
 
         
@@ -859,5 +860,5 @@ class SpecParallelGPUModelRunner(GPUModelRunner):
         if self.use_spec_decode:
             raise NotImplementedError(
                 "speculative decoding is not supported together "
-                "with speculative pipelining")
+                "with speculative parallelism")
         return sampler_output

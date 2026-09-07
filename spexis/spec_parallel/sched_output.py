@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Scheduler-output payloads specific to speculative pipeline parallelism."""
+"""Scheduler-output payloads specific to speculative parallelism."""
 
 from __future__ import annotations
 

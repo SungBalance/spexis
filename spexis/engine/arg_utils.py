@@ -229,19 +229,19 @@ class EngineArgs:
     reasoning_parser: Optional[str] = None
     use_tqdm_on_load: bool = LoadConfig.use_tqdm_on_load
 
-    # [Spexis] speculative pipelining options
+    # [Spexis] speculative parallelism options
     enable_spexis: bool = False
-    spexis_ver: str = None #spepcpipe version 1.0 1.5 2.0 2.5
+    spexis_ver: str = '1.0'  # 1.0 / 2.0 / 2.5 (see SpexisConfig.spexis_ver)
     exit_layer: Optional[List[bool]] = None  # len = p.p.
     exit_models: Optional[List[str]] = None  # len = p.p.
     cpu_embedding_path: str = None  # path to cpu embedding weights
     length_predictor_path: str = None  # path to length predictor weights
     verify_strategy: Optional[str] = None  # greedy or sampling
-    confidence_threshold: Optional[float] = None # 0~1 for dynamic scheduling
-    drop_ratio: Optional[float] = None # 0~1 for dynamic scheduling
+    drop_ratio: float = 0.0  # 0~1, la_sched1 drop fraction (ver >= 2.0)
     exit_model_type: Optional[str] = None
     enable_log: bool = False
     logdir: Optional[str] = None
+    enable_nvtx_profile: bool = False
 
     def __post_init__(self):
         if not self.tokenizer:
@@ -1088,10 +1088,14 @@ class EngineArgs:
         parser.add_argument(
             '--spexis-ver',
             type=str,
-            choices=['0.0', '1.0', '1.5', '2.0', '2.5'],
-            default=None,
+            choices=['1.0', '2.0', '2.5'],
+            default='1.0',
             help = \
-            'Version of the Spexis algorithm: 0.0 (disabled), 1.0 (base speculative parallel), 1.5 (+ confidence-based drop), 2.0 (+ lookahead length prediction), 2.5 (+ additional acceptance)'
+            'Spexis algorithm version (cumulative): 1.0 = speculative '
+            'parallelism only; 2.0 = + lookahead scheduling part 1 '
+            '(confidence-based spec drop, see --drop-ratio); 2.5 = + '
+            'lookahead scheduling part 2 (length-aware scheduling, '
+            'requires --length-predictor-path). The paper uses 2.5.'
         )
 
         # Single string, choice of strategies
@@ -1104,19 +1108,12 @@ class EngineArgs:
         )
 
         parser.add_argument(
-            '--confidence-threshold',
-            type=float,
-            default=None,
-            help= \
-            'Confidence Threshold for Dynamic scheduling'
-        )
-
-        parser.add_argument(
             '--drop-ratio',
             type=float,
-            default=None,
+            default=0.0,
             help= \
-            'Drop Ratio for Dynamic scheduling'
+            'Fraction (0-1) of the batch dropped from speculation each '
+            'iteration, lowest confidence first (spexis_ver >= 2.0)'
         )
 
         parser.add_argument(
@@ -1141,6 +1138,14 @@ class EngineArgs:
             default=None,
             help= \
             'The output dirctory of logging'
+        )
+
+        parser.add_argument(
+            '--enable-nvtx-profile',
+            type=str2bool,
+            default=False,
+            help= \
+            'Emit NVTX ranges on the Spexis hot paths for Nsight profiling'
         )
 
         return parser
@@ -1365,11 +1370,11 @@ class EngineArgs:
             cpu_embedding_path=self.cpu_embedding_path,
             length_predictor_path=self.length_predictor_path,
             verify_strategy=self.verify_strategy,
-            confidence_threshold=self.confidence_threshold,
             drop_ratio=self.drop_ratio,
             exit_model_type=self.exit_model_type,
             enable_log=self.enable_log,
             logdir=self.logdir,
+            enable_nvtx_profile=self.enable_nvtx_profile,
         )
 
         # Reminder: Please update docs/source/features/compatibility_matrix.md

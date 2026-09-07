@@ -15,6 +15,7 @@ import torch
 import itertools
 import time
 
+from spexis.spec_parallel import nvtx
 from spexis.spec_parallel.iteration_log import IterationRecord
 from spexis.spec_parallel.sched_output import (SpexisSchedulerOutput,
                                         SpexisSchedulerResumeHelper)
@@ -208,7 +209,7 @@ def total_embedding_process(
     to ``scheduler_output.embeddings`` for shipment to the first-stage
     worker. Per-stage wall times are recorded into ``rec``.
     """
-    torch.cuda.nvtx.range_push(msg="cpu embedding lookup")
+    nvtx.range_push(msg="cpu embedding lookup")
     first = time.perf_counter()
     # reorder requests & tokens to allign with gpu_model_runner
     update_states(input_batch, scheduler_output)
@@ -219,7 +220,7 @@ def total_embedding_process(
     input_embeds = embed_tokens[token_ids]
     fourth = time.perf_counter()
     scheduler_output.embeddings = input_embeds
-    torch.cuda.nvtx.range_pop()
+    nvtx.range_pop()
 
     rec.set_cpu_embed_times(update_states=second - first,
                             reorder=third - second,

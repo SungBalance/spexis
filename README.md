@@ -29,7 +29,7 @@ pipeline and tensor parallelism.
 
 | Component | Where |
 |---|---|
-| Speculative pipeline scheduler (drop policy, lookahead admission) | `spexis/spec_parallel/scheduler.py` |
+| Speculative-parallel scheduler (drop policy, lookahead admission) | `spexis/spec_parallel/scheduler.py` |
 | Early-exit draft models (Llama / Qwen adapters) | `spexis/spec_parallel/exit_models/` |
 | Model runner that runs target model + exit layer together | `spexis/spec_parallel/gpu_model_runner.py` |
 | Generation-length predictor and peak-KV projection | `spexis/lookahead_scheduling/length_predictor.py`, `length_calc.py` |
@@ -45,7 +45,7 @@ had to be touched, the changed regions are marked with `[Spexis]`, so
 
 - NVIDIA GPU, CUDA 12.4 (tested on H100 NVL, A100, L40S)
 - Python 3.11, PyTorch 2.6.0
-- Two or more GPUs (speculative pipelining requires `pipeline_parallel_size >= 2`)
+- Two or more GPUs (speculative parallelism requires `pipeline_parallel_size >= 2`)
 
 Tested inside the `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel` container.
 Spexis ships no Dockerfile: the install below is all that is needed on top
@@ -130,8 +130,8 @@ Key options:
 | `--exit-models` | Per-stage exit model path (`None` if the stage has no exit model) |
 | `--cpu-embedding-path` | Target model embedding weights, looked up on the CPU |
 | `--exit-model-type` | `llama` or `qwen` |
-| `--drop-ratio` | Fraction of the batch dropped from speculation each iteration, lowest confidence first |
-| `--spexis-ver` | `2.0`/`2.5` enable lookahead scheduling (needs `--length-predictor-path`) |
+| `--drop-ratio` | Fraction of the batch dropped from speculation each iteration, lowest confidence first (`--spexis-ver` >= 2.0) |
+| `--spexis-ver` | `1.0` speculative parallelism only; `2.0` + confidence-based drop; `2.5` + length-aware scheduling (needs `--length-predictor-path`). Cumulative; the paper uses `2.5` |
 | `--enable-log`, `--logdir` | Write the per-iteration metrics log (JSONL) |
 
 ### Troubleshooting

@@ -36,17 +36,22 @@ logger = init_logger(__name__)
 
 
 class SpexisScheduler(SchedulerInterface):
-    """Scheduler for speculative pipeline parallelism (Spexis).
+    """Scheduler for speculative parallelism (Spexis).
 
     Differences from the upstream V1 scheduler:
     - Two-phase updates per pipeline iteration: update_from_spec_output
       ingests exit-layer (draft) tokens; update_from_true_output verifies
       them against the target model and rolls back mismatches.
-    - Confidence-based spec drop (spexis_ver >= 1.5): per-iteration bucket sort
-      by draft confidence; only the top (1 - drop_ratio) fraction keeps
-      speculating, plus optional short-request acceleration (spexis_ver 2.5).
-    - Lookahead prefill admission (spexis_ver >= 2.0): projected peak KV usage
-      (see length_calc) delays new prefills that would overflow memory.
+    - Lookahead scheduling part 1 (spexis_ver >= 2.0): confidence-based
+      spec drop -- per-iteration bucket sort by draft confidence; only
+      the top (1 - drop_ratio) fraction keeps speculating
+      (_apply_confidence_drop).
+    - Lookahead scheduling part 2 (spexis_ver 2.5): length-aware
+      scheduling -- projected peak KV usage delays new prefills that
+      would overflow memory (_estimate_lookahead_memory, see
+      lookahead_scheduling.length_calc), and short predicted-length
+      requests are kept speculating past the drop cut
+      (_length_aware_boost).
 
     schedule() returns (SpexisSchedulerOutput, resume_helper,
     max_dropped_confidence, len_estimate_time).
@@ -72,13 +77,14 @@ class SpexisScheduler(SchedulerInterface):
         self.log_stats = log_stats
         self.structured_output_manager = structured_output_manager
 
-        self.spexis_len_pred = spexis_config.spexis_len_pred
         self.spexis_ver = spexis_config.spexis_ver
-        # Absolute confidence cutoff (0-1) for spec dropping; unused when
-        # drop_ratio drives relative dropping.
-        self.confidence_threshold = spexis_config.confidence_threshold
+        # Lookahead-scheduling switches derived from spexis_ver: part 1 is
+        # the confidence-based spec drop, part 2 is length-aware
+        # scheduling (see SpexisConfig.spexis_ver).
+        self.enable_la_sched1 = spexis_config.enable_la_sched1
+        self.enable_la_sched2 = spexis_config.enable_la_sched2
         # Fraction (0-1) of the batch dropped from speculation each
-        # iteration, lowest confidence first.
+        # iteration, lowest confidence first (la_sched1).
         self.drop_ratio = spexis_config.drop_ratio
         self.pp_size = parallel_config.pipeline_parallel_size
 
@@ -122,7 +128,7 @@ class SpexisScheduler(SchedulerInterface):
         self.lenesti_prec = spexis_config.lenesti_prec
         self.num_conf_buckets = spexis_config.confidence_buckets
         self.prefill_reserve_blocks = spexis_config.prefill_reserve_blocks
-        if self.spexis_len_pred:
+        if self.enable_la_sched2:
             self.expect_gen_len_cache = ExpGenLenCache(
                 self.max_iter, self.pp_size, self.average_spec_acc)
             self.len_prob_cache = LenProbCache(
@@ -135,14 +141,15 @@ class SpexisScheduler(SchedulerInterface):
         # In-flight (scheduled at least once, not finished) requests.
         self.running_scheduled: list[Request] = []
 
-        # Short-request extra acceleration (spexis_ver 2.5) knobs.
-        self.enable_add_acc = self.spexis_ver == "2.5"
-        self.max_add_reqs = spexis_config.max_add_reqs
-        self.add_acc_lenidx_thre = spexis_config.add_acc_lenidx_thre
-        self.add_acc_conf_thre = spexis_config.add_acc_conf_thre
+        # Length-aware scheduling boost (la_sched2) knobs.
+        self.la_sched2_max_reqs = spexis_config.la_sched2_max_reqs
+        self.la_sched2_lenidx_thre = spexis_config.la_sched2_lenidx_thre
+        self.la_sched2_conf_thre = spexis_config.la_sched2_conf_thre
 
-        logger.info("SpexisScheduler: spexis_ver=%s, len_pred=%s, add_acc=%s",
-                    self.spexis_ver, self.spexis_len_pred, self.enable_add_acc)
+        logger.info(
+            "SpexisScheduler: spexis_ver=%s (confidence drop=%s, "
+            "length-aware scheduling=%s)", self.spexis_ver,
+            self.enable_la_sched1, self.enable_la_sched2)
         
         # Requests marked for preemption whose in-flight iterations have not
         # drained yet (see _preempt_request).
@@ -205,7 +212,7 @@ class SpexisScheduler(SchedulerInterface):
         scheduled_resumed_reqs: list[Request] = []
 
         scheduled_running_flushed_reqs: list[Request] = []
-        scheduled_running_specpp_reqs: list[Request] = []
+        scheduled_running_sp_reqs: list[Request] = []
 
         preempted_reqs: list[Request] = []
 
@@ -243,100 +250,16 @@ class SpexisScheduler(SchedulerInterface):
             req_idx += 1
         self.to_be_preempted = new_to_be_preempted
 
-        drop_ratio = self.drop_ratio
-        batch_size = len(self.running_scheduled)
-        effective_pass_num = batch_size - int(batch_size * drop_ratio)
-        num_real_requests = 0  
-        num_buckets = self.num_conf_buckets
-        bucket_width = 1.0 / num_buckets
-        # Histogram over confidence: [0, w), [w, 2w), ..., [1 - w, 1.0].
-        confidence_bucket_list = [[] for _ in range(num_buckets)]
-        
-        # bucket sorting (by spec confidence)
-        req_idx = 0
-        while req_idx < len(self.running_scheduled):
-            request = self.running_scheduled[req_idx]
-            if request.should_preempt:
-                request.confidence_passed = False
-                req_idx += 1
-                continue
-            # Check Real Token only requests (from spec revision or from drop or chunked prefill)
-            if self._has_pending_real_token(request):
-                num_real_requests += 1
-                request.confidence_passed = False
-                req_idx += 1
-                continue
-            elif request.confidence_dropped or request.stop_dropped:
-                request.confidence_passed = False
-                req_idx += 1
-                continue
-            else:
-                request.confidence_passed = False
-                confidence_score = request.spec_confidence()
-                bucket_idx = min(int(confidence_score / bucket_width), num_buckets - 1)
-                if bucket_idx < 0 or bucket_idx >= num_buckets:
-                    raise ValueError(f"Invalid confidence score: {confidence_score} from request {request.request_id}")
-                confidence_bucket_list[bucket_idx].append(request)
-                req_idx += 1
-                continue
-        
-        # Choose Drop Requests
+        # Lookahead scheduling part 1 (spexis_ver >= 2.0): decide which
+        # requests keep speculating this iteration. When disabled, the
+        # scheduling loop below treats every request as confidence-passed.
         max_dropped_confidence = 0
-        effective_pass_num = max(effective_pass_num - num_real_requests, 0)
-        tmp_idx = num_buckets - 1
-        tmp_req_idx = 0
-        while effective_pass_num > 0 and tmp_idx >= 0:
-            if len(confidence_bucket_list[tmp_idx]) <= effective_pass_num:
-                for request in confidence_bucket_list[tmp_idx]:
-                    request.confidence_passed = True
-                effective_pass_num -= len(confidence_bucket_list[tmp_idx])
-                max_dropped_confidence = tmp_idx * bucket_width
-            else:
-                while effective_pass_num > 0 and tmp_req_idx < len(confidence_bucket_list[tmp_idx]):
-                    request = confidence_bucket_list[tmp_idx][tmp_req_idx]
-                    request.confidence_passed = True
-                    effective_pass_num -= 1
-                    tmp_req_idx += 1  
-                max_dropped_confidence = confidence_bucket_list[tmp_idx][tmp_req_idx].spec_confidence() 
-            tmp_idx -= 1
-        
-        # scheme2.5 additional acceleration
-        if self.enable_add_acc:
-            max_add_acc_req = self.max_add_reqs
-            if tmp_req_idx != 0:
-                while tmp_req_idx < len(confidence_bucket_list[tmp_idx]):
-                    request = confidence_bucket_list[tmp_idx][tmp_req_idx]
-                    if (request.expect_remain_len_idx(self.lenprob_threshold) == self.add_acc_lenidx_thre) and (request.spec_confidence()>self.add_acc_conf_thre) and (max_add_acc_req > 0):
-                        request.confidence_passed = True
-                        max_add_acc_req -= 1
-                    
-                    # break while (one bucket)
-                    if max_add_acc_req==0:
-                            break
-                    tmp_req_idx += 1
-                tmp_idx -= 1
-            
-            if max_add_acc_req != 0:
-                while tmp_idx >=0:
-                    for request in confidence_bucket_list[tmp_idx]:
-                        if (request.expect_remain_len_idx(self.lenprob_threshold) == self.add_acc_lenidx_thre) and (request.spec_confidence()>self.add_acc_conf_thre) and (max_add_acc_req > 0):
-                            request.confidence_passed = True
-                            max_add_acc_req -= 1
-                        # break for (one bucket)
-                        if max_add_acc_req==0:
-                            break
-                    # break while (whole bucket)
-                    if max_add_acc_req==0:
-                            break
-                    
-                    tmp_idx -= 1
+        if self.enable_la_sched1:
+            max_dropped_confidence = self._apply_confidence_drop()
 
-        num_dropped = 0
-        dropped_reqids = []
-        
-        # if no prefill available -> threshold = -1000, if available -> threshold = pre-fixed value
-
-        # First, schedule flush request and sort by confidence
+        # Schedule the RUNNING requests: real-token work (spec fixes,
+        # drop drains, chunked prefills) is unconditional; speculating
+        # requests follow the drop decision.
         req_index = 0
         while req_index < len(self.running_scheduled) and token_budget > 0:
             request = self.running_scheduled[req_index]
@@ -398,8 +321,9 @@ class SpexisScheduler(SchedulerInterface):
                 continue
             # 1-2) Schedule high prob reqs and Drop low prob reqs
             else:  # True or None
-                # 1-2.a) Schedule high prob reqs
-                if request.confidence_passed:
+                # 1-2.a) Schedule high prob reqs (every request passes
+                # when the confidence drop is disabled)
+                if not self.enable_la_sched1 or request.confidence_passed:
                     num_new_tokens = (request.num_tokens_with_spec -
                                     request.num_computed_tokens)
                     if (0 < self.scheduler_config.long_prefill_token_threshold <
@@ -417,7 +341,7 @@ class SpexisScheduler(SchedulerInterface):
                         break
 
                     # Schedule the request.
-                    scheduled_running_specpp_reqs.append(request)
+                    scheduled_running_sp_reqs.append(request)
                     request.num_scheduled += 1
 
                     self.scheduled_req_ids.add(request.request_id)
@@ -449,35 +373,16 @@ class SpexisScheduler(SchedulerInterface):
         skipped_waiting_requests: deque[Request] = deque()
 
         
+        # Lookahead scheduling part 2 (spexis_ver 2.5): project peak KV
+        # usage before admitting new prefills.
         should_estimate_length = False
         delay_prefill = False
-        len_estimate_time=0
-        # scheme 2.0
-        if self.spexis_len_pred:
-            len_estimate_start_time = time.perf_counter()
-            if not preempted_reqs:
-                if len(self.waiting) > 0 and token_budget > 0 and self.kv_cache_manager.usage > self.mem_esti_bar:
-                    # length prediction for waiting requests
-                    should_estimate_length = True
-                    # Reserve headroom for per-request partially filled
-                    # blocks (fragmentation).
-                    mem_in_tokens = (
-                        (self.kv_cache_manager.block_pool.num_gpu_blocks -
-                         self.prefill_reserve_blocks) * self.block_size)
-
-                    mem_usage_list, peak_mem, peak_iter = calculate_peak_mem(
-                        exp_gen_len_cache=self.expect_gen_len_cache,
-                        len_prob_cache=self.len_prob_cache,
-                        iter_list=self.iter_list, # hard coded max iter for length prediction
-                        current_batch=self.running_scheduled,
-                        length_thresholds=self.lenprob_threshold, # hard coded length thresholds for length prediction
-                        expect_precision=self.lenesti_prec, #self.scheduler_config.length_predictor_precisions,
-                    )
-
-                    if peak_mem > self.mem_estimate_margin * mem_in_tokens:
-                        delay_prefill = True
-            len_estimate_end_time = time.perf_counter()
-            len_estimate_time = len_estimate_end_time - len_estimate_start_time
+        len_estimate_time = 0
+        if self.enable_la_sched2:
+            (should_estimate_length, delay_prefill, mem_usage_list,
+             mem_in_tokens,
+             len_estimate_time) = self._estimate_lookahead_memory(
+                 token_budget, bool(preempted_reqs))
 
         #Fourth, schedule the WAITING requests.
         if not preempted_reqs and not delay_prefill: # for Strict FCFS: and len(self.to_be_preempted) == 0
@@ -488,12 +393,10 @@ class SpexisScheduler(SchedulerInterface):
                 request = self.waiting[0]
 
                 if should_estimate_length:
+                    # Add this candidate's projected footprint on top of
+                    # the batch projection and re-check the margin.
                     for i, iter_val in enumerate(self.iter_list, start=1):
                         mem_usage_list[i-1] += (request.num_tokens + self.expect_gen_len_cache.get(iter_val))
-                        if mem_usage_list[i-1] > peak_mem:
-                            peak_mem = mem_usage_list[i-1]
-                            peak_iter = iter_val
-                        
                         if mem_usage_list[i-1] > self.mem_estimate_margin * mem_in_tokens:
                             delay_prefill = True
                             break
@@ -574,8 +477,8 @@ class SpexisScheduler(SchedulerInterface):
         # this step, the total number of scheduled requests can be smaller than
         # len(self.running).
         assert (len(scheduled_new_reqs) + len(scheduled_resumed_reqs) +
-                len(scheduled_running_flushed_reqs) + len(scheduled_running_specpp_reqs) <= len(self.running_scheduled)), \
-                    f"{len(scheduled_new_reqs)}+{len(scheduled_resumed_reqs)}+{len(scheduled_running_flushed_reqs)}+{len(scheduled_running_specpp_reqs)} > {len(self.running_scheduled)}"
+                len(scheduled_running_flushed_reqs) + len(scheduled_running_sp_reqs) <= len(self.running_scheduled)), \
+                    f"{len(scheduled_new_reqs)}+{len(scheduled_resumed_reqs)}+{len(scheduled_running_flushed_reqs)}+{len(scheduled_running_sp_reqs)} > {len(self.running_scheduled)}"
 
         grammar_bitmask = self.structured_output_manager.grammar_bitmask(
             self.requests,
@@ -613,20 +516,20 @@ class SpexisScheduler(SchedulerInterface):
             ) for req in scheduled_running_flushed_reqs
         ]
 
-        running_specpp_reqs_data = [
+        running_sp_reqs_data = [
             self._make_cached_request_data(
                 req,
                 num_scheduled_tokens[req.request_id],
                 len(scheduled_spec_decode_tokens.get(req.request_id, ())),
                 req_to_new_block_ids[req.request_id],
                 resumed_from_preemption=False,
-            ) for req in scheduled_running_specpp_reqs
+            ) for req in scheduled_running_sp_reqs
         ]
 
         scheduler_output = SpexisSchedulerOutput(
             scheduled_new_reqs=new_reqs_data,
             scheduled_cached_reqs=resumed_reqs_data +
-            running_flushed_reqs_data + running_specpp_reqs_data,
+            running_flushed_reqs_data + running_sp_reqs_data,
             num_scheduled_tokens=num_scheduled_tokens,
             total_num_scheduled_tokens=total_num_scheduled_tokens,
             scheduled_spec_decode_tokens=scheduled_spec_decode_tokens,
@@ -699,6 +602,165 @@ class SpexisScheduler(SchedulerInterface):
         return ((request.spec_result == False and request.just_fixed == True)
                 or (request.drop_end == True)
                 or (request.num_computed_tokens < request.num_prompt_tokens))
+
+    def _apply_confidence_drop(self) -> float:
+        """Lookahead scheduling part 1 (spexis_ver >= 2.0):
+        confidence-based spec drop.
+
+        Bucket-sorts the running requests by joint spec confidence and
+        marks only the top (1 - drop_ratio) fraction as
+        confidence_passed; the scheduling loop drops the rest from
+        speculation. Requests that must run a real token this step, or
+        that are already draining a drop, never enter the selection.
+
+        Returns the highest confidence that was dropped (for the
+        iteration log).
+        """
+        batch_size = len(self.running_scheduled)
+        effective_pass_num = batch_size - int(batch_size * self.drop_ratio)
+        num_real_requests = 0
+        num_buckets = self.num_conf_buckets
+        bucket_width = 1.0 / num_buckets
+        # Histogram over confidence: [0, w), [w, 2w), ..., [1 - w, 1.0].
+        confidence_bucket_list = [[] for _ in range(num_buckets)]
+
+        # bucket sorting (by spec confidence)
+        for request in self.running_scheduled:
+            request.confidence_passed = False
+            if request.should_preempt:
+                continue
+            # Real-token-only requests (spec revision, drop drain, or
+            # chunked prefill) are scheduled unconditionally.
+            if self._has_pending_real_token(request):
+                num_real_requests += 1
+                continue
+            if request.confidence_dropped or request.stop_dropped:
+                continue
+            confidence_score = request.spec_confidence()
+            bucket_idx = min(int(confidence_score / bucket_width),
+                             num_buckets - 1)
+            if bucket_idx < 0 or bucket_idx >= num_buckets:
+                raise ValueError(
+                    f"Invalid confidence score: {confidence_score} "
+                    f"from request {request.request_id}")
+            confidence_bucket_list[bucket_idx].append(request)
+
+        # Choose Drop Requests: pass buckets from high confidence down
+        # until the pass budget is spent.
+        max_dropped_confidence = 0
+        effective_pass_num = max(effective_pass_num - num_real_requests, 0)
+        tmp_idx = num_buckets - 1
+        tmp_req_idx = 0
+        while effective_pass_num > 0 and tmp_idx >= 0:
+            if len(confidence_bucket_list[tmp_idx]) <= effective_pass_num:
+                for request in confidence_bucket_list[tmp_idx]:
+                    request.confidence_passed = True
+                effective_pass_num -= len(confidence_bucket_list[tmp_idx])
+                max_dropped_confidence = tmp_idx * bucket_width
+            else:
+                while effective_pass_num > 0 and tmp_req_idx < len(
+                        confidence_bucket_list[tmp_idx]):
+                    request = confidence_bucket_list[tmp_idx][tmp_req_idx]
+                    request.confidence_passed = True
+                    effective_pass_num -= 1
+                    tmp_req_idx += 1
+                max_dropped_confidence = confidence_bucket_list[tmp_idx][
+                    tmp_req_idx].spec_confidence()
+            tmp_idx -= 1
+
+        if self.enable_la_sched2:
+            self._length_aware_boost(confidence_bucket_list, tmp_idx,
+                                     tmp_req_idx)
+
+        return max_dropped_confidence
+
+    def _length_aware_boost(self, confidence_bucket_list: list[list[Request]],
+                            tmp_idx: int, tmp_req_idx: int) -> None:
+        """Lookahead Scheduling: Length-Aware Scheduling (spexis_ver 2.5).
+
+        Keeps up to la_sched2_max_reqs short-predicted-length,
+        high-confidence requests speculating even though they fell below
+        the drop cut, so requests that are about to finish are not
+        stalled by the drop. Resumes the scan exactly where the drop
+        selection stopped (tmp_idx / tmp_req_idx).
+        """
+        max_boost_reqs = self.la_sched2_max_reqs
+        if tmp_req_idx != 0:
+            while tmp_req_idx < len(confidence_bucket_list[tmp_idx]):
+                request = confidence_bucket_list[tmp_idx][tmp_req_idx]
+                if (request.expect_remain_len_idx(self.lenprob_threshold)
+                        == self.la_sched2_lenidx_thre) and (
+                            request.spec_confidence()
+                            > self.la_sched2_conf_thre) and (max_boost_reqs
+                                                             > 0):
+                    request.confidence_passed = True
+                    max_boost_reqs -= 1
+
+                # break while (one bucket)
+                if max_boost_reqs == 0:
+                    break
+                tmp_req_idx += 1
+            tmp_idx -= 1
+
+        if max_boost_reqs != 0:
+            while tmp_idx >= 0:
+                for request in confidence_bucket_list[tmp_idx]:
+                    if (request.expect_remain_len_idx(self.lenprob_threshold)
+                            == self.la_sched2_lenidx_thre) and (
+                                request.spec_confidence()
+                                > self.la_sched2_conf_thre) and (
+                                    max_boost_reqs > 0):
+                        request.confidence_passed = True
+                        max_boost_reqs -= 1
+                    # break for (one bucket)
+                    if max_boost_reqs == 0:
+                        break
+                # break while (whole bucket)
+                if max_boost_reqs == 0:
+                    break
+
+                tmp_idx -= 1
+
+    def _estimate_lookahead_memory(self, token_budget: int,
+                                   have_preempted: bool):
+        """Lookahead scheduling part 2 (spexis_ver 2.5): project the peak
+        KV usage (in tokens) over future iterations, to decide whether
+        admitting new prefills is safe (see
+        lookahead_scheduling.length_calc).
+
+        Returns (should_estimate_length, delay_prefill, mem_usage_list,
+        mem_in_tokens, elapsed_seconds). mem_usage_list is None unless
+        should_estimate_length.
+        """
+        start_time = time.perf_counter()
+        should_estimate_length = False
+        delay_prefill = False
+        mem_usage_list = None
+        mem_in_tokens = 0
+        if not have_preempted:
+            if len(self.waiting) > 0 and token_budget > 0 and \
+                    self.kv_cache_manager.usage > self.mem_esti_bar:
+                # length prediction for waiting requests
+                should_estimate_length = True
+                # Reserve headroom for per-request partially filled
+                # blocks (fragmentation).
+                mem_in_tokens = (
+                    (self.kv_cache_manager.block_pool.num_gpu_blocks -
+                     self.prefill_reserve_blocks) * self.block_size)
+
+                mem_usage_list, peak_mem, _ = calculate_peak_mem(
+                    exp_gen_len_cache=self.expect_gen_len_cache,
+                    len_prob_cache=self.len_prob_cache,
+                    iter_list=self.iter_list,
+                    current_batch=self.running_scheduled,
+                    length_thresholds=self.lenprob_threshold,
+                    expect_precision=self.lenesti_prec,
+                )
+
+                if peak_mem > self.mem_estimate_margin * mem_in_tokens:
+                    delay_prefill = True
+        return (should_estimate_length, delay_prefill, mem_usage_list,
+                mem_in_tokens, time.perf_counter() - start_time)
 
     def update_from_output(
         self,
