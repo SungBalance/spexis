@@ -204,3 +204,4 @@ benchmarks/**/*.json
 actionlint
 shellcheck*/
 
+experiments/**/results/
