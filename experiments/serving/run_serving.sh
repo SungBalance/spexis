@@ -17,7 +17,7 @@ EXIT_MODEL_TYPE=${EXIT_MODEL_TYPE:-llama}          # llama | qwen
 LENGTH_PREDICTOR_DIR=${LENGTH_PREDICTOR_DIR:-}     # required for SPEXIS_VER 2.5;
                                                    # model-level dir, split picked by PP
 
-DATASET=${DATASET:-specbench}                      # specbench | sharegpt | ultrachat | lmsyschat
+DATASET=${DATASET:-specbench}                      # specbench | sharegpt | lmsyschat
 DATASET_PATH=${DATASET_PATH:-/workspace/cache/specbench_question.jsonl}
 
 # Results go next to (not inside) the repository:
@@ -170,7 +170,6 @@ for pair in $PP_TP_PAIRS; do
                 --max-duration $(( BENCH_MINUTES * 60 )) \
                 --temperature "$TEMPERATURE" \
                 --specbench-output-len 2048 \
-                --ultrachat-output-len 2048 \
                 --seed "$SEED" \
                 > "$EXP_DIR/client.log" 2>&1 \
                 && echo ">> Client finished." || echo "!! Client failed; see client.log"

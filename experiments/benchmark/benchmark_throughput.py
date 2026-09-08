@@ -12,7 +12,7 @@ from typing import Any, Optional, Union
 import torch
 import uvloop
 from benchmark_dataset import (SampleRequest, ShareGPTDataset,
-                               SpecBenchDataset, UltraChatDataset)
+                               SpecBenchDataset)
 from benchmark_utils import convert_to_pytorch_benchmark_format, write_to_json
 from tqdm import tqdm
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
@@ -129,9 +129,6 @@ def get_requests(args, tokenizer):
         dataset_cls = SpecBenchDataset
         sample_kwargs["output_len"] = 2048
         sample_kwargs["task"] = args.specbench_task
-    elif args.dataset_name == "ultrachat":
-        dataset_cls = UltraChatDataset
-        sample_kwargs["output_len"] = 2048
     else:
         raise ValueError(f"Unknown dataset name: {args.dataset_name}")
     # Remove None values
@@ -217,7 +214,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset-name",
         type=str,
-        choices=["sharegpt", "specbench", "ultrachat"],
+        choices=["sharegpt", "specbench"],
         help="Name of the dataset to benchmark on.",
         default="sharegpt")
     parser.add_argument('--specbench-task',

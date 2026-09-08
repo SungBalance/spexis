@@ -79,7 +79,6 @@ takes the split-level directory, if you launch the engine directly.)
 |---|---|---|
 | `specbench` | JSONL, one `{question_id, category, turns, reference}` per line | [Spec-Bench](https://github.com/hemingkx/Spec-Bench) `data/spec_bench/question.jsonl` |
 | `sharegpt` | single JSON array of `{conversations: [{from, value}, ...]}` | `ShareGPT_V3_unfiltered_cleaned_split.json` (HF) |
-| `ultrachat` | parquet with a `messages` column | `HuggingFaceH4/ultrachat_200k`, `test_gen` split |
 | `lmsyschat` | parquet | `lmsys/lmsys-chat-1m` |
 
 The paper mainly uses SpecBench for throughput and SpecBench /

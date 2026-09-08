@@ -52,8 +52,7 @@ except ImportError:
     from argparse import ArgumentParser as FlexibleArgumentParser
 
 from benchmark_dataset import (LmsysChatDataset, SampleRequest,
-                               ShareGPTDataset, SpecBenchDataset,
-                               UltraChatDataset)
+                               ShareGPTDataset, SpecBenchDataset)
 from benchmark_utils import convert_to_pytorch_benchmark_format, write_to_json
 
 
@@ -66,7 +65,6 @@ class BenchmarkMetrics:
     total_input: int
     total_output: int
     request_throughput: float
-    request_goodput: float
     output_throughput: float
     total_token_throughput: float
     mean_ttft_ms: float
@@ -94,49 +92,6 @@ class BenchmarkMetrics:
     std_normalized_latency_ms: float
     percentiles_normalized_latency_ms: list[tuple[float, float]]
 
-
-async def get_request(
-    input_requests: list[SampleRequest],
-    request_rate: float,
-    burstiness: float = 1.0,
-) -> AsyncGenerator[SampleRequest, None]:
-    """
-    Asynchronously generates requests at a specified rate
-    with OPTIONAL burstiness.
-
-    Args:
-        input_requests:
-            A list of input requests, each represented as a SampleRequest.
-        request_rate:
-            The rate at which requests are generated (requests/s).
-        burstiness (optional):
-            The burstiness factor of the request generation.
-            Only takes effect when request_rate is not inf.
-            Default value is 1, which follows a Poisson process.
-            Otherwise, the request intervals follow a gamma distribution.
-            A lower burstiness value (0 < burstiness < 1) results
-            in more bursty requests, while a higher burstiness value
-            (burstiness > 1) results in a more uniform arrival of requests.
-    """
-    input_requests: Iterable[SampleRequest] = iter(input_requests)
-
-    # Calculate scale parameter theta to maintain the desired request_rate.
-    assert burstiness > 0, (
-        f"A positive burstiness factor is expected, but given {burstiness}.")
-    theta = 1.0 / (request_rate * burstiness)
-
-    for request in input_requests:
-        yield request
-
-        if request_rate == float("inf"):
-            # If the request rate is infinity, then we don't need to wait.
-            continue
-
-        # Sample the request interval from the gamma distribution.
-        # If burstiness is 1, it follows exponential distribution.
-        interval = np.random.gamma(shape=burstiness, scale=theta)
-        # The next request will be sent after the interval.
-        await asyncio.sleep(interval)
 
 async def get_request(
     input_requests: list[SampleRequest],
@@ -253,12 +208,10 @@ def calculate_metrics(
     tokenizer: PreTrainedTokenizerBase,
     selected_percentile_metrics: list[str],
     selected_percentiles: list[float],
-    goodput_config_dict: dict[str, float],
 ) -> tuple[BenchmarkMetrics, list[int]]:
     actual_output_lens: list[int] = []
     total_input = 0
     completed = 0
-    good_completed = 0
     itls: list[float] = []
     tpots: list[float] = []
     all_tpots: list[float] = []
@@ -289,7 +242,6 @@ def calculate_metrics(
                 latency_minus_ttft = outputs[out_i].latency - outputs[out_i].ttft
                 tpot = latency_minus_ttft / (output_len - 1)
                 tpots.append(tpot)
-            # Note: if output_len <= 1, we regard tpot as 0 for goodput
             all_tpots.append(tpot)
             itls += outputs[out_i].itl
             ttfts.append(outputs[out_i].ttft)
@@ -299,28 +251,6 @@ def calculate_metrics(
             completed += 1
         else:
             actual_output_lens.append(0)
-
-    if goodput_config_dict:
-        valid_metrics = []
-        slo_values = []
-
-        if "ttft" in goodput_config_dict:
-            valid_metrics.append(ttfts)
-            slo_values.append(goodput_config_dict["ttft"] /
-                              MILLISECONDS_TO_SECONDS_CONVERSION)
-        if "tpot" in goodput_config_dict:
-            valid_metrics.append(all_tpots)
-            slo_values.append(goodput_config_dict["tpot"] /
-                              MILLISECONDS_TO_SECONDS_CONVERSION)
-        if "e2el" in goodput_config_dict:
-            valid_metrics.append(e2els)
-            slo_values.append(goodput_config_dict["e2el"] /
-                              MILLISECONDS_TO_SECONDS_CONVERSION)
-
-        for req_metric in zip(*valid_metrics):
-            is_good_req = all([s >= r for s, r in zip(slo_values, req_metric)])
-            if is_good_req:
-                good_completed += 1
 
     if completed == 0:
         warnings.warn(
@@ -332,7 +262,6 @@ def calculate_metrics(
         total_input=total_input,
         total_output=sum(actual_output_lens),
         request_throughput=completed / dur_s,
-        request_goodput=good_completed / dur_s,
         output_throughput=sum(actual_output_lens) / dur_s,
         total_token_throughput=(total_input + sum(actual_output_lens)) / dur_s,
         mean_ttft_ms=np.mean(ttfts or 0) *
@@ -382,11 +311,9 @@ async def benchmark(
     request_rate: float,
     burstiness: float,
     disable_tqdm: bool,
-    profile: bool,
     selected_percentile_metrics: list[str],
     selected_percentiles: list[float],
     ignore_eos: bool,
-    goodput_config_dict: dict[str, float],
     max_concurrency: Optional[int],
     lora_modules: Optional[Iterable[str]],
     extra_body: Optional[dict],
@@ -434,22 +361,6 @@ async def benchmark(
         lora_modules = iter(
             [random.choice(lora_modules) \
                 for _ in range(len(input_requests))])
-
-    if profile:
-        print("Starting profiler...")
-        profile_input = RequestFuncInput(model=model_id,
-                                         model_name=model_name,
-                                         prompt=test_prompt,
-                                         api_url=base_url + "/start_profile",
-                                         prompt_len=test_prompt_len,
-                                         output_len=test_output_len,
-                                         logprobs=logprobs,
-                                         multi_modal_content=test_mm_content,
-                                         ignore_eos=ignore_eos,
-                                         extra_body=extra_body)
-        profile_output = await request_func(request_func_input=profile_input)
-        if profile_output.success:
-            print("Profiler started")
 
     if burstiness == 1.0:
         distribution = "Poisson process"
@@ -510,20 +421,6 @@ async def benchmark(
 
     num_input_all = len(outputs)
 
-    if profile:
-        print("Stopping profiler...")
-        profile_input = RequestFuncInput(
-            model=model_id,
-            prompt=test_prompt,
-            api_url=base_url + "/stop_profile",
-            prompt_len=test_prompt_len,
-            output_len=test_output_len,
-            logprobs=logprobs,
-        )
-        profile_output = await request_func(request_func_input=profile_input)
-        if profile_output.success:
-            print("Profiler stopped")
-
     if pbar is not None:
         pbar.close()
 
@@ -536,7 +433,6 @@ async def benchmark(
         tokenizer=tokenizer,
         selected_percentile_metrics=selected_percentile_metrics,
         selected_percentiles=selected_percentiles,
-        goodput_config_dict=goodput_config_dict,
     )
 
     print("{s:{c}^{n}}".format(s=' Serving Benchmark Result ', n=50, c='='))
@@ -549,9 +445,6 @@ async def benchmark(
                                  metrics.total_output))
     print("{:<40} {:<10.2f}".format("Request throughput (req/s):",
                                     metrics.request_throughput))
-    if goodput_config_dict:
-        print("{:<40} {:<10.2f}".format("Request goodput (req/s):",
-                                        metrics.request_goodput))
     print("{:<40} {:<10.2f}".format("Output token throughput (tok/s):",
                                     metrics.output_throughput))
     print("{:<40} {:<10.2f}".format("Total Token throughput (tok/s):",
@@ -563,8 +456,6 @@ async def benchmark(
         "total_input_tokens": metrics.total_input,
         "total_output_tokens": metrics.total_output,
         "request_throughput": metrics.request_throughput,
-        "request_goodput:":
-        metrics.request_goodput if goodput_config_dict else None,
         "output_throughput": metrics.output_throughput,
         "total_token_throughput": metrics.total_token_throughput,
         "input_lens": [output.prompt_len for output in outputs],
@@ -619,41 +510,6 @@ async def benchmark(
     print("=" * 50)
 
     return result
-
-
-def check_goodput_args(args):
-    # Check and parse goodput arguments
-    goodput_config_dict = {}
-    VALID_NAMES = ["ttft", "tpot", "e2el"]
-    if args.goodput:
-        goodput_config_dict = parse_goodput(args.goodput)
-        for slo_name, slo_val in goodput_config_dict.items():
-            if slo_name not in VALID_NAMES:
-                raise ValueError(
-                    f"Invalid metric name found, {slo_name}: {slo_val}. "
-                    "The service level objective name should be one of "
-                    f"{str(VALID_NAMES)}. ")
-            if slo_val < 0:
-                raise ValueError(
-                    f"Invalid value found, {slo_name}: {slo_val}. "
-                    "The service level objective value should be "
-                    "non-negative.")
-    return goodput_config_dict
-
-
-def parse_goodput(slo_pairs):
-    goodput_config_dict = {}
-    try:
-        for slo_pair in slo_pairs:
-            slo_name, slo_val = slo_pair.split(":")
-            goodput_config_dict[slo_name] = float(slo_val)
-    except ValueError as err:
-        raise argparse.ArgumentTypeError(
-            "Invalid format found for service level objectives. "
-            "Specify service level objectives for goodput as \"KEY:VALUE\" "
-            "pairs, where the key is a metric name, and the value is a "
-            "number in milliseconds.") from err
-    return goodput_config_dict
 
 
 def save_to_pytorch_benchmark_format(args: argparse.Namespace,
@@ -725,13 +581,6 @@ def main(args: argparse.Namespace):
                                          num_requests=args.num_prompts,
                                          output_len=args.specbench_output_len,
                                          task=args.specbench_task,),
-            "ultrachat":
-            lambda: UltraChatDataset(random_seed=args.seed,
-                                     dataset_path=args.dataset_path).sample(
-                                         tokenizer=tokenizer,
-                                         num_requests=args.num_prompts,
-                                         output_len=args.ultrachat_output_len
-                                     ),
             "lmsyschat":
             lambda: LmsysChatDataset(random_seed=args.seed,
                                      dataset_path=args.dataset_path).sample(
@@ -745,7 +594,6 @@ def main(args: argparse.Namespace):
             input_requests = dataset_mapping[args.dataset_name]()
         except KeyError as err:
             raise ValueError(f"Unknown dataset: {args.dataset_name}") from err
-    goodput_config_dict = check_goodput_args(args)
 
     # Collect the sampling parameters.
     sampling_params = {
@@ -771,36 +619,29 @@ def main(args: argparse.Namespace):
     gc.collect()
     gc.freeze()
 
-    if args.fix_batch is False:
-        print("Executing Request Rate Benchmark Serving")
-        benchmark_result = asyncio.run(
-            benchmark(
-                backend=backend,
-                api_url=api_url,
-                base_url=base_url,
-                model_id=model_id,
-                model_name=model_name,
-                tokenizer=tokenizer,
-                input_requests=input_requests,
-                logprobs=args.logprobs,
-                request_rate=args.request_rate,
-                burstiness=args.burstiness,
-                disable_tqdm=args.disable_tqdm,
-                profile=args.profile,
-                selected_percentile_metrics=args.percentile_metrics.split(","),
-                selected_percentiles=[
-                    float(p) for p in args.metric_percentiles.split(",")
-                ],
-                ignore_eos=args.ignore_eos,
-                goodput_config_dict=goodput_config_dict,
-                max_concurrency=args.max_concurrency,
-                lora_modules=args.lora_modules,
-                extra_body=sampling_params,
-                max_duration=args.max_duration,
-            ))
-
-    elif args.fix_batch is True:
-        assert False, "Do not Support Fix BS experiment on serving duration test"
+    benchmark_result = asyncio.run(
+        benchmark(
+            backend=backend,
+            api_url=api_url,
+            base_url=base_url,
+            model_id=model_id,
+            model_name=model_name,
+            tokenizer=tokenizer,
+            input_requests=input_requests,
+            logprobs=args.logprobs,
+            request_rate=args.request_rate,
+            burstiness=args.burstiness,
+            disable_tqdm=args.disable_tqdm,
+            selected_percentile_metrics=args.percentile_metrics.split(","),
+            selected_percentiles=[
+                float(p) for p in args.metric_percentiles.split(",")
+            ],
+            ignore_eos=args.ignore_eos,
+            max_concurrency=args.max_concurrency,
+            lora_modules=args.lora_modules,
+            extra_body=sampling_params,
+            max_duration=args.max_duration,
+        ))
 
     # Save config and results to json
     if args.save_result:
@@ -885,7 +726,7 @@ if __name__ == "__main__":
         "--dataset-name",
         type=str,
         default="sharegpt",
-        choices=["sharegpt", "specbench", "ultrachat", "lmsyschat"],
+        choices=["sharegpt", "specbench", "lmsyschat"],
         help="Name of the dataset to benchmark on.",
     )
     parser.add_argument("--dataset-path",
@@ -968,12 +809,6 @@ if __name__ == "__main__":
         help="Specify to disable tqdm progress bar.",
     )
     parser.add_argument(
-        "--profile",
-        action="store_true",
-        help="Use Torch Profiler. The endpoint must be launched with "
-        "VLLM_TORCH_PROFILER_DIR to enable profiler.",
-    )
-    parser.add_argument(
         "--save-result",
         action="store_true",
         help="Specify to save benchmark results to a json file",
@@ -1031,18 +866,6 @@ if __name__ == "__main__":
         "Default value is \"99\". "
         "Use \"--percentile-metrics\" to select metrics.",
     )
-    parser.add_argument(
-        "--goodput",
-        nargs="+",
-        required=False,
-        help="Specify service level objectives for goodput as \"KEY:VALUE\" "
-        "pairs, where the key is a metric name, and the value is in "
-        "milliseconds. Multiple \"KEY:VALUE\" pairs can be provided, "
-        "separated by spaces. Allowed request level metric names are "
-        "\"ttft\", \"tpot\", \"e2el\". For more context on the definition of "
-        "goodput, refer to DistServe paper: https://arxiv.org/pdf/2401.09670 "
-        "and the blog: https://hao-ai-lab.github.io/blogs/distserve")
-
     # group for dataset specific arguments
     sharegpt_group = parser.add_argument_group("sharegpt dataset options")
     sharegpt_group.add_argument(
@@ -1067,13 +890,6 @@ if __name__ == "__main__":
         " total, writing, roleplay, reasoning, math, coding, extraction, stem"
         " humanities, translation, summarization, qa, math_reasoning, rag"
     )
-    ultrachat_group = parser.add_argument_group("ultrachat dataset options")
-    ultrachat_group.add_argument(
-        "--ultrachat-output-len",
-        type=int,
-        default=2048,
-        help="Output length for each request. Overrides the output length "
-        "from the UltraChat dataset.")
     lmsyschat_group = parser.add_argument_group("lmsyschat dataset options")
     lmsyschat_group.add_argument(
         "--lmsyschat-output-len",
@@ -1141,13 +957,6 @@ if __name__ == "__main__":
         help="Maximum duration (in seconds) to send new requests. "
              "After this time, no new requests will be issued, "
              "but ongoing requests will still complete."
-    )
-
-    parser.add_argument(
-        "--fix-batch",
-        action="store_true",
-        default=False,
-        help="Whether to use fixed batch experiment"
     )
 
     args = parser.parse_args()
