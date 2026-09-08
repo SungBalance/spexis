@@ -40,7 +40,10 @@ after 1/4); the directories are not interchangeable. The scripts pick
 
 `embed_tokens.bin` is `torch.save({"embed_tokens.weight": tensor})` --
 the target's input-embedding table, which the first pipeline stage
-looks up on the CPU instead of holding a GPU copy.
+looks up on the CPU instead of holding a GPU copy. It is part of the
+target model's own weights and therefore not distributed with the exit
+models; generate it with
+`python tools/extract_embed_tokens.py --model <target> --output <exit-model-dir>/embed_tokens.bin`.
 
 **Length predictor** (`SPEXIS_VER=2.5`). A small MLP over the exit
 layer's hidden state that predicts the probability that a request's

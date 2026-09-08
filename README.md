@@ -67,13 +67,21 @@ existing launch scripts and tooling keep working.
 
 ### Exit-model artifacts
 
-Speculation needs two files per target model, which are **not** in this
-repository yet (release in progress):
+Speculation needs two artifacts per target model:
 
 - `exit_1_<pp>/` — the trained early-exit model for that pipeline split
-  (`exit_1_2` for PP=2, `exit_1_4` for PP=4)
+  (`exit_1_2` for PP=2, `exit_1_4` for PP=4). Not in this repository
+  yet; release is in progress.
 - `embed_tokens.bin` — the target model's embedding weights, which the
-  first stage looks up on the CPU instead of holding on the GPU
+  first stage looks up on the CPU instead of holding on the GPU. This is
+  part of the target model's own weights, so it is not distributed;
+  generate it from the checkpoint you downloaded:
+
+  ```bash
+  python tools/extract_embed_tokens.py \
+      --model /path/to/Llama-3.3-70B-Instruct \
+      --output /path/to/exitmodels/Llama-3.3-70B-Instruct/embed_tokens.bin
+  ```
 
 ## Quick start
 
