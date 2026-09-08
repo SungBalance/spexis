@@ -7,9 +7,15 @@ default, listed at the top of each script.
 ## Prerequisites
 
 Spexis installed (see the top-level README) on a multi-GPU node, plus
-the models and a dataset below. All paths are passed to the scripts as
-environment variables, so the files can live anywhere as long as the
-directory *structure* matches.
+the benchmark harness's extra dependencies:
+
+```bash
+pip install pandas datasets
+```
+
+You also need the models and a dataset below. All paths are passed to
+the scripts as environment variables, so the files can live anywhere as
+long as the directory *structure* matches.
 
 ### Models and artifacts
 
