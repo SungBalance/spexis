@@ -17,7 +17,7 @@ directory *structure* matches.
 $MODEL_DIR                 # target model: a standard HF checkpoint
                            #   (e.g. meta-llama/Llama-3.3-70B-Instruct, Qwen/Qwen3-32B)
 
-$EXIT_MODEL_DIR            # e.g. models/exitmodels/Llama-3.3-70B-Instruct/
+$EXIT_MODEL_DIR            # e.g. /path/to/exitmodels/Llama-3.3-70B-Instruct/
   exit_1_2/                # early-exit (draft) model for the PP=2 split
     config.json
     pytorch_model.bin
@@ -25,7 +25,7 @@ $EXIT_MODEL_DIR            # e.g. models/exitmodels/Llama-3.3-70B-Instruct/
   embed_tokens.bin         # the target's embedding table for the CPU lookup
 
 $LENGTH_PREDICTOR_DIR      # SPEXIS_VER=2.5 only; points at ONE split, e.g.
-                           #   models/length-predictor/Llama-3.3-70B-Instruct/exit_1_2/
+                           #   /path/to/length-predictor/Llama-3.3-70B-Instruct/exit_1_2/
 ```
 
 **Exit models.** Each `exit_1_<pp>/` directory is a self-contained
@@ -85,9 +85,9 @@ process at a set of request rates for a fixed duration.
 
 ```bash
 cd experiments/serving
-MODEL_DIR=/models/Llama-3.3-70B-Instruct \
-EXIT_MODEL_DIR=/models/exitmodels/Llama-3.3-70B-Instruct \
-DATASET_PATH=/data/spec_bench/question.jsonl \
+MODEL_DIR=/path/to/Llama-3.3-70B-Instruct \
+EXIT_MODEL_DIR=/path/to/exitmodels/Llama-3.3-70B-Instruct \
+DATASET_PATH=/path/to/spec_bench/question.jsonl \
 PP_TP_PAIRS="2,4" SPEXIS_OPTS="True False" SPEXIS_VER=1.0 \
 REQUEST_RATES="3.8 4.0 4.2" \
 ./run_serving.sh
@@ -110,9 +110,9 @@ accuracy).
 
 ```bash
 cd experiments/throughput
-MODEL_DIR=/models/Llama-3.3-70B-Instruct \
-EXIT_MODEL_DIR=/models/exitmodels/Llama-3.3-70B-Instruct \
-DATASET_PATH=/data/spec_bench/question.jsonl \
+MODEL_DIR=/path/to/Llama-3.3-70B-Instruct \
+EXIT_MODEL_DIR=/path/to/exitmodels/Llama-3.3-70B-Instruct \
+DATASET_PATH=/path/to/spec_bench/question.jsonl \
 PP_TP_PAIRS="2,1" BATCH_SIZES="16 32 64" \
 ./run_fixed_batch.sh
 ```
