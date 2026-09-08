@@ -76,8 +76,12 @@ wait_server_ready() {
     echo "!! Server not ready after ${SERVER_TIMEOUT}s."; return 1
 }
 
-verify_strategy="sampling"
-[[ "$TEMPERATURE" == "0.0" ]] && verify_strategy="greedy"
+# Spexis implements greedy verification only (temperature 0.0).
+if [[ "$SPEXIS_OPTS" == *True* && "$TEMPERATURE" != "0.0" ]]; then
+    echo "Error: Spexis runs require TEMPERATURE=0.0 (greedy verification only)." >&2
+    exit 1
+fi
+verify_strategy="greedy"
 
 for pair in $PP_TP_PAIRS; do
     IFS=',' read -r pp_size tp_size <<< "$pair"

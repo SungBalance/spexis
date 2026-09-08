@@ -236,7 +236,7 @@ class EngineArgs:
     exit_models: Optional[List[str]] = None  # len = p.p.
     cpu_embedding_path: str = None  # path to cpu embedding weights
     length_predictor_path: str = None  # path to length predictor weights
-    verify_strategy: Optional[str] = None  # greedy or sampling
+    verify_strategy: str = 'greedy'  # only greedy is implemented
     drop_ratio: float = 0.0  # 0~1, la_sched1 drop fraction (ver >= 2.0)
     exit_model_type: Optional[str] = None
     enable_log: bool = False
@@ -1103,8 +1103,10 @@ class EngineArgs:
             '--verify-strategy',
             type=str,
             choices=['greedy', 'sampling'],
+            default='greedy',
             help= \
-            'verify strategy of Spexis. It should be either greedy or sampling'
+            'Speculation verification strategy. Only greedy is implemented '
+            '(requires temperature 0.0); sampling raises NotImplementedError.'
         )
 
         parser.add_argument(

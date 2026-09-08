@@ -1039,6 +1039,13 @@ class SpexisScheduler(SchedulerInterface):
                 assert not prompt_logprobs_tensors
 
     def add_request(self, request: Request) -> None:
+        # Verification is exact-match against the target model's greedy
+        # output, so sampled decoding cannot be verified yet.
+        if request.sampling_params.temperature != 0.0:
+            raise NotImplementedError(
+                "Spexis currently implements greedy verification only: "
+                "requests must use temperature 0.0 (got "
+                f"{request.sampling_params.temperature})")
         self.waiting.append(request)
         self.requests[request.request_id] = request
         if self.log_stats:

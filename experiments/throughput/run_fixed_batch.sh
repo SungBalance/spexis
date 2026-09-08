@@ -44,8 +44,12 @@ export VLLM_USE_RAY_COMPILED_DAG_CHANNEL_TYPE=nccl
 mkdir -p "$RESULT_ROOT"
 TMP_LOG_PATH="$RESULT_ROOT/.tmp_iter_log.jsonl"
 
-verify_strategy="sampling"
-[[ "$TEMPERATURE" == "0.0" ]] && verify_strategy="greedy"
+# Spexis implements greedy verification only (temperature 0.0).
+if [[ "$SPEXIS_OPTS" == *True* && "$TEMPERATURE" != "0.0" ]]; then
+    echo "Error: Spexis runs require TEMPERATURE=0.0 (greedy verification only)." >&2
+    exit 1
+fi
+verify_strategy="greedy"
 
 for pair in $PP_TP_PAIRS; do
     IFS=',' read -r pp_size tp_size <<< "$pair"
@@ -112,7 +116,7 @@ for pair in $PP_TP_PAIRS; do
 
             # Saturated-window analysis over the iteration log.
             if [[ "$enable_spexis" == "True" ]]; then
-                python "$ANALYZER_DIR/throughput_saturated.py" \
+                python "$ANALYZER_DIR/throughput_saturated_sp.py" \
                     --temp-log-path "$TMP_LOG_PATH" \
                     --batch-size "$batch_size" --drop-ratio "$DROP_RATIO" \
                     | tee -a "$EXP_DIR/console.log"

@@ -2043,7 +2043,11 @@ class SpexisConfig:
     exit_models: list[str] = None
     cpu_embedding_path: str = None
     length_predictor_path: str = None
-    verify_strategy: str = None
+    # Speculation verification strategy. Only "greedy" is implemented:
+    # spec tokens are verified by exact match against the target model's
+    # greedy output, so requests must use temperature 0.0 (enforced per
+    # request by the scheduler). "sampling" is reserved for future work.
+    verify_strategy: str = "greedy"
     # Fraction (0-1) of the batch dropped from speculation each iteration,
     # lowest confidence first (la_sched1, spexis_ver >= 2.0).
     drop_ratio: float = 0.0
@@ -2099,9 +2103,13 @@ class SpexisConfig:
                         i] is not None, f"you specified model \"{self.exit_models[i]}\" for pp node[{i}], \
                                     but pp node[{i}] is not activated for Spexis"
 
-            if self.verify_strategy not in ["greedy", "sampling"]:
-                assert False, f"verify strategy should be greedy / sampling. \
-                                You typed {self.verify_strategy}"
+            if self.verify_strategy is None:
+                self.verify_strategy = "greedy"
+            if self.verify_strategy != "greedy":
+                raise NotImplementedError(
+                    "Spexis currently implements greedy verification only "
+                    "(temperature 0.0); got verify_strategy="
+                    f"{self.verify_strategy!r}")
 
             self.exit_hf_config = []
             self.exit_model_config = []
