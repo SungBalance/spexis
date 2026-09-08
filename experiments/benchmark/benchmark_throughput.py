@@ -9,7 +9,6 @@ import time
 import warnings
 from typing import Any, Optional, Union
 
-import torch
 import uvloop
 from benchmark_dataset import (SampleRequest, ShareGPTDataset,
                                SpecBenchDataset)
@@ -72,9 +71,7 @@ async def run_vllm_async(
                 ))
 
         generators = []
-        
-        # torch.cuda.cudart().cudaProfilerStart()
-        torch.cuda.nvtx.range_push(msg="async_generate")
+
         start = time.perf_counter()
         for i, (prompt, sp) in enumerate(zip(prompts, sampling_params)):
             generator = llm.generate(prompt,
@@ -88,9 +85,6 @@ async def run_vllm_async(
 
         end = time.perf_counter()
 
-        torch.cuda.nvtx.range_pop()
-        # torch.cuda.cudart().cudaProfilerStop()
-        
         return end - start
 
 def save_to_pytorch_benchmark_format(args: argparse.Namespace,
