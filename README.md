@@ -27,8 +27,8 @@ experiments are kept (CUDA, Llama/Qwen families).
 
 ## Requirements
 
-- NVIDIA GPUs with CUDA 12.4. Tested on A40, RTX PRO 6000, H100 SXM,
-  A100 SXM, and L40S (as in the paper).
+- NVIDIA GPUs with CUDA 12.4. Tested on A40, H100 SXM, A100 SXM,
+  and L40S.
 - Two or more GPUs — speculative parallelism requires
   `pipeline_parallel_size >= 2`.
 - Python 3.11, PyTorch 2.6.0. Tested inside the

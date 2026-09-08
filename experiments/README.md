@@ -130,10 +130,6 @@ Notes:
 
 - With `DROP_RATIO > 0` the analyzer measures the window at the
   effective batch size `N - floor(N * drop_ratio)`.
-- With `SPEXIS_VER=2.5` the length-aware boost can occasionally
-  schedule more than the effective batch size, so the strict full-batch
-  window may be shorter than 50 iterations; the analyzer prints a
-  warning when that happens.
 
 ## Layout
 
