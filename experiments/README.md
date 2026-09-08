@@ -6,15 +6,73 @@ default, listed at the top of each script.
 
 ## Prerequisites
 
-- Spexis installed (see the top-level README) on a multi-GPU node.
-- The target model weights (e.g. `Llama-3.3-70B-Instruct`).
-- The exit-model artifacts for that model (`exit_1_2/`, `exit_1_4/`,
-  `embed_tokens.bin`), and for `SPEXIS_VER=2.5` the length-predictor
-  weights.
-- A dataset file. The paper mainly uses
-  [SpecBench](https://github.com/hemingkx/Spec-Bench)
-  (`data/spec_bench/question.jsonl`); `sharegpt`, `ultrachat` and
-  `lmsyschat` are also supported by the harness.
+Spexis installed (see the top-level README) on a multi-GPU node, plus
+the models and a dataset below. All paths are passed to the scripts as
+environment variables, so the files can live anywhere as long as the
+directory *structure* matches.
+
+### Models and artifacts
+
+```
+$MODEL_DIR                 # target model: a standard HF checkpoint
+                           #   (e.g. meta-llama/Llama-3.3-70B-Instruct, Qwen/Qwen3-32B)
+
+$EXIT_MODEL_DIR            # e.g. models/exitmodels/Llama-3.3-70B-Instruct/
+  exit_1_2/                # early-exit (draft) model for the PP=2 split
+    config.json
+    pytorch_model.bin
+  exit_1_4/                # same structure, trained for the PP=4 split
+  embed_tokens.bin         # the target's embedding table for the CPU lookup
+
+$LENGTH_PREDICTOR_DIR      # SPEXIS_VER=2.5 only; points at ONE split, e.g.
+                           #   models/length-predictor/Llama-3.3-70B-Instruct/exit_1_2/
+```
+
+**Exit models.** Each `exit_1_<pp>/` directory is a self-contained
+model in standard HF format: `config.json` is a `*ForCausalLM` config
+with `num_hidden_layers = 1` and the target model's hidden dimensions,
+and `pytorch_model.bin` holds one decoder layer plus an lm_head
+(~2.8 GB for the 70B target). It consumes the hidden states at the
+first pipeline-stage boundary, so it is trained per target model *and*
+per split point (`exit_1_2` = after 1/2 of the layers, `exit_1_4` =
+after 1/4); the directories are not interchangeable. The scripts pick
+`exit_1_2` or `exit_1_4` automatically from the PP size.
+
+`embed_tokens.bin` is `torch.save({"embed_tokens.weight": tensor})` --
+the target's input-embedding table, which the first pipeline stage
+looks up on the CPU instead of holding a GPU copy.
+
+**Length predictor** (`SPEXIS_VER=2.5`). A small MLP over the exit
+layer's hidden state that predicts the probability that a request's
+remaining length exceeds each threshold. Like the exit models it is
+trained per target and per split, laid out as:
+
+```
+length-predictor/
+  Llama-3.3-70B-Instruct/
+    exit_1_2/
+      config.json          # in_dim, hidden, thresholds_list, dropout_p, dtype
+      <weights>.pt         # any single *.pt file; discovered by glob
+    exit_1_4/
+  Qwen3-32B/
+```
+
+`LENGTH_PREDICTOR_DIR` must point at the split-level directory that
+matches the PP size (e.g. `.../Llama-3.3-70B-Instruct/exit_1_2`).
+
+### Datasets
+
+`DATASET` selects the loader and `DATASET_PATH` the file:
+
+| `DATASET` | Expected file | Source |
+|---|---|---|
+| `specbench` | JSONL, one `{question_id, category, turns, reference}` per line | [Spec-Bench](https://github.com/hemingkx/Spec-Bench) `data/spec_bench/question.jsonl` |
+| `sharegpt` | single JSON array of `{conversations: [{from, value}, ...]}` | `ShareGPT_V3_unfiltered_cleaned_split.json` (HF) |
+| `ultrachat` | parquet with a `messages` column | `HuggingFaceH4/ultrachat_200k`, `test_gen` split |
+| `lmsyschat` | parquet | `lmsys/lmsys-chat-1m` |
+
+The paper mainly uses SpecBench for throughput and SpecBench /
+LMSYS-Chat for serving.
 
 ## 1. Serving experiment (`serving/run_serving.sh`)
 
