@@ -20,7 +20,10 @@ LENGTH_PREDICTOR_DIR=${LENGTH_PREDICTOR_DIR:-}     # required for SPEXIS_VER 2.5
 DATASET=${DATASET:-specbench}                      # specbench | sharegpt | ultrachat | lmsyschat
 DATASET_PATH=${DATASET_PATH:-/workspace/cache/specbench_question.jsonl}
 
-RESULT_ROOT=${RESULT_ROOT:-$PWD/results/serving}
+# Results go next to (not inside) the repository:
+#   <repo-parent>/cache/spexis_results/serving
+REPO_PARENT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+RESULT_ROOT=${RESULT_ROOT:-$REPO_PARENT/cache/spexis_results/serving}
 
 PP_TP_PAIRS=${PP_TP_PAIRS:-"2,1"}                  # space-separated "pp,tp" pairs
 SPEXIS_OPTS=${SPEXIS_OPTS:-"True False"}           # run Spexis and/or the PP/TP baseline

@@ -1,23 +1,6 @@
 from enum import auto, IntEnum
 from typing import List, Any, Dict, Union, Tuple
 
-class SpecBenchTask(IntEnum):
-    """Spec-Bench tasks."""
-    writing = auto()
-    roleplay= auto()
-    reasoning = auto()
-    math = auto()
-    coding = auto()
-    extraction = auto()
-    stem = auto()
-    humanities = auto()
-    translation = auto()
-    summarization = auto()
-    qa = auto()
-    math_reasoning = auto()
-    rag = auto()
-    total = auto()
-
 class SeparatorStyle(IntEnum):
     """Separator styles."""
 

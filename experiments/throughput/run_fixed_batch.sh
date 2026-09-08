@@ -21,7 +21,10 @@ LENGTH_PREDICTOR_DIR=${LENGTH_PREDICTOR_DIR:-}     # required for SPEXIS_VER 2.5
 DATASET=${DATASET:-specbench}
 DATASET_PATH=${DATASET_PATH:-/workspace/cache/specbench_question.jsonl}
 
-RESULT_ROOT=${RESULT_ROOT:-$PWD/results/throughput}
+# Results go next to (not inside) the repository:
+#   <repo-parent>/cache/spexis_results/throughput
+REPO_PARENT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+RESULT_ROOT=${RESULT_ROOT:-$REPO_PARENT/cache/spexis_results/throughput}
 
 PP_TP_PAIRS=${PP_TP_PAIRS:-"2,1"}                  # space-separated "pp,tp" pairs
 SPEXIS_OPTS=${SPEXIS_OPTS:-"True False"}           # run Spexis and/or the PP/TP baseline
@@ -87,7 +90,7 @@ for pair in $PP_TP_PAIRS; do
             rm -f "$TMP_LOG_PATH"
 
             CMD=( python "$HARNESS"
-                --backend vllm --async-engine
+                --backend vllm
                 --model "$MODEL_DIR"
                 --dataset-name "$DATASET" --dataset-path "$DATASET_PATH"
                 --num-prompts "$batch_size"

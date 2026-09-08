@@ -10,7 +10,7 @@ Spexis installed (see the top-level README) on a multi-GPU node, plus
 the benchmark harness's extra dependencies:
 
 ```bash
-pip install pandas datasets
+pip install pandas
 ```
 
 You also need the models and a dataset below. All paths are passed to
@@ -103,7 +103,9 @@ REQUEST_RATES="3.8 4.0 4.2" \
 
 Each run writes `client.log` (latency/throughput summary),
 `server_console.log`, and the per-iteration server log
-(`server_iter_log.jsonl`) under `results/serving/<experiment-id>/`.
+(`server_iter_log.jsonl`) under
+`<repo-parent>/cache/spexis_results/serving/<experiment-id>/`
+(override with `RESULT_ROOT`).
 The baseline runs (`SPEXIS_OPTS` containing `False`) use plain PP/TP
 with the same engine settings.
 
