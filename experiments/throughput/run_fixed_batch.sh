@@ -15,7 +15,8 @@ set -u
 MODEL_DIR=${MODEL_DIR:-/workspace/models/Llama-3.3-70B-Instruct}
 EXIT_MODEL_DIR=${EXIT_MODEL_DIR:-/workspace/models/exitmodels/Llama-3.3-70B-Instruct}
 EXIT_MODEL_TYPE=${EXIT_MODEL_TYPE:-llama}          # llama | qwen
-LENGTH_PREDICTOR_DIR=${LENGTH_PREDICTOR_DIR:-}     # required for SPEXIS_VER 2.5
+LENGTH_PREDICTOR_DIR=${LENGTH_PREDICTOR_DIR:-}     # required for SPEXIS_VER 2.5;
+                                                   # model-level dir, split picked by PP
 
 DATASET=${DATASET:-specbench}
 DATASET_PATH=${DATASET_PATH:-/workspace/cache/specbench_question.jsonl}
@@ -56,10 +57,12 @@ for pair in $PP_TP_PAIRS; do
 
     case "$pp_size" in
         2) exit_layer_flags="True False"
-           exit_models_args="$EXIT_MODEL_DIR/exit_1_2 None" ;;
+           exit_models_args="$EXIT_MODEL_DIR/exit_1_2 None"
+           lenpred_path="$LENGTH_PREDICTOR_DIR/exit_1_2" ;;
         4) exit_layer_flags="True False False False"
-           exit_models_args="$EXIT_MODEL_DIR/exit_1_4 None None None" ;;
-        *) exit_layer_flags=""; exit_models_args="" ;;
+           exit_models_args="$EXIT_MODEL_DIR/exit_1_4 None None None"
+           lenpred_path="$LENGTH_PREDICTOR_DIR/exit_1_4" ;;
+        *) exit_layer_flags=""; exit_models_args=""; lenpred_path="" ;;
     esac
 
     for enable_spexis in $SPEXIS_OPTS; do
@@ -107,7 +110,7 @@ for pair in $PP_TP_PAIRS; do
                     --cpu-embedding-path "$EXIT_MODEL_DIR/embed_tokens.bin"
                 )
                 if [[ "$SPEXIS_VER" == "2.5" ]]; then
-                    CMD+=( --length-predictor-path "$LENGTH_PREDICTOR_DIR" )
+                    CMD+=( --length-predictor-path "$lenpred_path" )
                 fi
             fi
 

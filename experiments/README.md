@@ -24,8 +24,8 @@ $EXIT_MODEL_DIR            # e.g. /path/to/exitmodels/Llama-3.3-70B-Instruct/
   exit_1_4/                # same structure, trained for the PP=4 split
   embed_tokens.bin         # the target's embedding table for the CPU lookup
 
-$LENGTH_PREDICTOR_DIR      # SPEXIS_VER=2.5 only; points at ONE split, e.g.
-                           #   /path/to/length-predictor/Llama-3.3-70B-Instruct/exit_1_2/
+$LENGTH_PREDICTOR_DIR      # SPEXIS_VER=2.5 only, e.g.
+                           #   /path/to/length-predictor/Llama-3.3-70B-Instruct/
 ```
 
 **Exit models.** Each `exit_1_<pp>/` directory is a self-contained
@@ -60,8 +60,10 @@ length-predictor/
   Qwen3-32B/
 ```
 
-`LENGTH_PREDICTOR_DIR` must point at the split-level directory that
-matches the PP size (e.g. `.../Llama-3.3-70B-Instruct/exit_1_2`).
+Like `EXIT_MODEL_DIR`, `LENGTH_PREDICTOR_DIR` points at the
+model-level directory and the scripts append `exit_1_2`/`exit_1_4`
+from the PP size. (The engine flag `--length-predictor-path` itself
+takes the split-level directory, if you launch the engine directly.)
 
 ### Datasets
 
