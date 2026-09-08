@@ -11,11 +11,18 @@ checkpoint you already downloaded:
     python tools/extract_embed_tokens.py \\
         --model /path/to/Llama-3.3-70B-Instruct \\
         --output /path/to/exitmodels/Llama-3.3-70B-Instruct/embed_tokens.bin
+
+Only the shard holding the embedding tensor is read, so this needs a
+few GB of host memory rather than the whole checkpoint.
 """
 import argparse
+import json
+import os
 
 import torch
-from transformers import AutoModelForCausalLM
+from safetensors import safe_open
+
+WEIGHT_NAME = "model.embed_tokens.weight"
 
 
 def parse_args():
@@ -28,16 +35,36 @@ def parse_args():
     return parser.parse_args()
 
 
+def find_shard(model_dir: str) -> str:
+    """Return the safetensors file that holds the embedding tensor."""
+    index_path = os.path.join(model_dir, "model.safetensors.index.json")
+    if os.path.exists(index_path):
+        with open(index_path) as f:
+            weight_map = json.load(f)["weight_map"]
+        if WEIGHT_NAME not in weight_map:
+            raise KeyError(
+                f"{WEIGHT_NAME} not listed in {index_path}")
+        return os.path.join(model_dir, weight_map[WEIGHT_NAME])
+
+    single = os.path.join(model_dir, "model.safetensors")
+    if os.path.exists(single):
+        return single
+    raise FileNotFoundError(
+        f"No safetensors checkpoint found under {model_dir}")
+
+
 def main():
     args = parse_args()
 
-    model = AutoModelForCausalLM.from_pretrained(args.model,
-                                                 torch_dtype=torch.float16,
-                                                 device_map="cpu")
-    embed = model.state_dict()["model.embed_tokens.weight"]
+    shard = find_shard(args.model)
+    with safe_open(shard, framework="pt", device="cpu") as f:
+        embed = f.get_tensor(WEIGHT_NAME)
+
+    # Match the historical format: fp16, keyed "embed_tokens.weight".
+    embed = embed.to(torch.float16)
     torch.save({"embed_tokens.weight": embed}, args.output)
     print(f"Saved embed_tokens {tuple(embed.shape)} ({embed.dtype}) "
-          f"to {args.output}")
+          f"from {os.path.basename(shard)} to {args.output}")
 
 
 if __name__ == "__main__":
