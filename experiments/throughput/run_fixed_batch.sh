@@ -71,8 +71,11 @@ for pair in $PP_TP_PAIRS; do
             continue
         fi
 
+        sp_tag="SpexisFalse"
+        [[ "$enable_spexis" == "True" ]] && sp_tag="SpexisTrue-v${SPEXIS_VER}"
+
         for batch_size in $BATCH_SIZES; do
-            EXP_ID="${MODEL_NAME}_PP${pp_size}_TP${tp_size}_Spexis${enable_spexis}_N${batch_size}_Drop${DROP_RATIO}"
+            EXP_ID="${MODEL_NAME}_PP${pp_size}_TP${tp_size}_${sp_tag}_N${batch_size}_Drop${DROP_RATIO}"
             EXP_DIR="$RESULT_ROOT/$EXP_ID"
             mkdir -p "$EXP_DIR"
             if [[ -f "$EXP_DIR/result_log.jsonl" ]]; then

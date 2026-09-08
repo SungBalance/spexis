@@ -104,9 +104,11 @@ for pair in $PP_TP_PAIRS; do
             echo "Skipping: Spexis requires pipeline_parallel_size >= 2."
             continue
         fi
+        sp_tag="SpexisFalse"
+        [[ "$enable_spexis" == "True" ]] && sp_tag="SpexisTrue-v${SPEXIS_VER}"
 
         for request_rate in $REQUEST_RATES; do
-            EXP_ID="${MODEL_NAME}_PP${pp_size}_TP${tp_size}_Spexis${enable_spexis}_Drop${DROP_RATIO}_RR${request_rate}"
+            EXP_ID="${MODEL_NAME}_PP${pp_size}_TP${tp_size}_${sp_tag}_Drop${DROP_RATIO}_RR${request_rate}"
             EXP_DIR="$RESULT_ROOT/$EXP_ID"
             mkdir -p "$EXP_DIR"
             if [[ -f "$EXP_DIR/client.log" ]]; then
