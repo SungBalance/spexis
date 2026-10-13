@@ -154,4 +154,9 @@ decoding was removed to keep the research code readable. Where upstream
 files are modified, the changed regions are marked with `[Spexis]`. See
 `NOTICE` for the list of modifications.
 
+This is a refactored version of the code used in the Spexis paper; we thank
+the contributors to the original implementation:
+[@hyungyuJung](https://github.com/hyungyuJung), Jaehyuk Yu, Hoonseo Choi,
+and Sungkyun Kim.
+
 Licensed under Apache-2.0, the same license as vLLM. See `LICENSE`.
